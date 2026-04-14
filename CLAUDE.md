@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FloatingScreenCasting is an Android application for dual-display in-car entertainment systems. It displays a floating video window on a secondary screen (driving display) while providing playback controls on the primary screen (central control display).
+FSCast is a DLNA Digital Media Renderer (DMR) receiver application that uses Android's Presentation API to display content on multiple screens within a single Android system. It displays a floating video window on a secondary display (driving screen) while providing playback controls on the primary display (central control screen).
 
-**Target Hardware**: In-car dual-display systems where the driving display has a fixed Display ID of 2.
+**Target Hardware**: In-car dual-display systems or any multi-screen Android system where the secondary display has a fixed Display ID (typically 2).
 
 ## Build & Run Commands
 

@@ -2,20 +2,35 @@
 
 <div align="center">
 
-**Android DLNA投屏应用 - 车载双屏娱乐系统**
+**DLNA单系统多屏幕投屏接收器应用**
 
 [![Android](https://img.shields.io/badge/Android-11%2B-blue.svg)](https://android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-purple.svg)](https://kotlinlang.org)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-1.7.6-2DD4C8.svg)](https://developer.android.com/jetpack/compose)
 [![Media3](https://img.shields.io/badge/Media3-1.5.1-green.svg)](https://developer.android.com/media)
 
-一个专为车载双屏系统设计的DLNA投屏接收端应用，支持中控屏控制与驾驶屏悬浮窗播放。
+基于Android Presentation API的单系统多屏幕DLNA投屏接收器，支持中控屏控制界面与副屏悬浮窗播放，专为车载双屏娱乐系统设计。
 
 </div>
 
 ---
 
-## ✨ 功能特性
+## 📖 项目简介
+
+FSCast是一个基于Android Presentation API的单系统多屏幕DLNA投屏接收器应用。它运行在单个Android系统上，利用Android的多屏幕显示能力，在不同的物理屏幕上展示不同的内容：
+
+- **主屏幕（中控屏）**: DLNA控制界面，提供播放控制、进度调节、窗口设置等功能
+- **副屏幕（驾驶屏）**: 视频播放窗口，显示DLNA投屏的多媒体内容
+
+本应用专为车载双屏娱乐系统设计，完美适配需要在不同屏幕上分别显示控制界面和视频内容的场景。
+
+### 核心特性
+- ✅ DLNA DMR完整实现，支持主流投屏协议
+- ✅ Android Presentation API多屏幕显示
+- ✅ Jetpack Compose + Material 3现代化UI
+- ✅ Media3 ExoPlayer高性能视频播放
+- ✅ iOS风格视觉设计
+- ✅ 实时悬浮窗位置/大小/透明度调节
 
 ### 📺 双屏显示
 - **中控屏（主屏）**: iOS风格控制界面
