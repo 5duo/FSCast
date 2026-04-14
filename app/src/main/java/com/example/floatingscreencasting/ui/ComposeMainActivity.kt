@@ -148,7 +148,8 @@ class ComposeMainActivity : AppCompatActivity() {
                 videoPresentation = null
                 _uiState.value = uiState.value.copy(
                     isWindowVisible = false,
-                    castingStatus = "等待投屏"
+                    castingStatus = "等待投屏",
+                    isPlaying = false
                 )
             }
         }
@@ -234,27 +235,13 @@ class ComposeMainActivity : AppCompatActivity() {
         onContinueWatching: () -> Unit
     ) {
         Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Text(
-                            "投屏控制",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-                        )
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.background,
-                        titleContentColor = MaterialTheme.colorScheme.onBackground
-                    )
-                )
-            }
+            topBar = {}  // 空的顶部栏
         ) { paddingValues ->
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(start = 150.dp, end = 20.dp, top = 16.dp, bottom = 16.dp)
+                    .padding(start = 150.dp, end = 20.dp, top = 40.dp, bottom = 16.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -737,6 +724,8 @@ class ComposeMainActivity : AppCompatActivity() {
                         videoPresentation?.playMedia(uri)
                         if (uri.isNotEmpty()) {
                             dlnaService.updateTransportState("PLAYING")
+                            // 播放开始
+                            _uiState.value = uiState.value.copy(isPlaying = true)
                         }
                     } catch (e: Exception) {
                         Log.e("ComposeMainActivity", "播放视频失败", e)
@@ -748,6 +737,8 @@ class ComposeMainActivity : AppCompatActivity() {
                 Log.d("ComposeMainActivity", "收到停止回调")
                 try {
                     videoPresentation?.stop()
+                    // 停止播放
+                    _uiState.value = uiState.value.copy(isPlaying = false)
                 } catch (e: Exception) {
                     Log.e("ComposeMainActivity", "停止播放失败", e)
                 }
@@ -757,6 +748,8 @@ class ComposeMainActivity : AppCompatActivity() {
                 Log.d("ComposeMainActivity", "收到暂停回调")
                 try {
                     videoPresentation?.pause()
+                    // 暂停播放
+                    _uiState.value = uiState.value.copy(isPlaying = false)
                 } catch (e: Exception) {
                     Log.e("ComposeMainActivity", "暂停播放失败", e)
                 }
@@ -766,6 +759,8 @@ class ComposeMainActivity : AppCompatActivity() {
                 Log.d("ComposeMainActivity", "收到恢复播放回调")
                 try {
                     videoPresentation?.play()
+                    // 恢复播放
+                    _uiState.value = uiState.value.copy(isPlaying = true)
                 } catch (e: Exception) {
                     Log.e("ComposeMainActivity", "恢复播放失败", e)
                 }

@@ -50,7 +50,7 @@ fun ModernSlider(
     icon: String? = null
 ) {
     var isDragging by remember { mutableStateOf(false) }
-    var dragPosition by remember { mutableStateOf(0f) }
+    var currentDragX by remember { mutableStateOf(0f) }
 
     // 计算当前进度
     val progress = (value - valueRange.start) / (valueRange.endInclusive - valueRange.start)
@@ -90,19 +90,19 @@ fun ModernSlider(
                     valueRange = valueRange,
                     progress = progress,
                     isDragging = isDragging,
-                    dragPosition = dragPosition,
+                    currentDragX = currentDragX,
                     onDragStart = {
                         if (enabled) isDragging = true
                     },
-                    onDragChange = { newValue ->
+                    onDragChange = { newValue, dragX ->
                         if (enabled) {
-                            // newValue 已经是计算好的值，直接使用
+                            currentDragX = dragX
                             onValueChange(newValue)
                         }
                     },
                     onDragEnd = {
                         isDragging = false
-                        dragPosition = 0f
+                        currentDragX = 0f
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -133,9 +133,9 @@ private fun ModernSliderTrack(
     valueRange: ClosedFloatingPointRange<Float>,
     progress: Float,
     isDragging: Boolean,
-    dragPosition: Float,
+    currentDragX: Float,
     onDragStart: () -> Unit,
-    onDragChange: (Float) -> Unit,
+    onDragChange: (Float, Float) -> Unit,
     onDragEnd: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -163,14 +163,14 @@ private fun ModernSliderTrack(
                         onDragStart()
                         // 点击时跳转到该位置
                         val clickValue = calculateValueFromPosition(offset.x)
-                        onDragChange(clickValue)
+                        onDragChange(clickValue, offset.x)
                     },
                     onDragCancel = { onDragEnd() },
                     onDragEnd = { onDragEnd() },
                     onHorizontalDrag = { change, _ ->
-                        // 使用绝对位置而不是增量
+                        // 使用绝对位置而不是增量，并传递拖动位置
                         val newValue = calculateValueFromPosition(change.position.x)
-                        onDragChange(newValue)
+                        onDragChange(newValue, change.position.x)
                     }
                 )
             }
@@ -181,8 +181,15 @@ private fun ModernSliderTrack(
             val centerY = size.height / 2
             val effectiveWidth = trackWidth - thumbRadius * 2
 
-            // 计算滑块位置
-            val thumbPosition = thumbRadius + progress * effectiveWidth
+            // 计算滑块位置 - 拖动时使用实际拖动位置
+            val thumbPosition = if (isDragging) {
+                // 拖动时，限制在有效范围内
+                val clampedX = currentDragX.coerceIn(thumbRadius, trackWidth - thumbRadius)
+                clampedX
+            } else {
+                // 非拖动时，使用计算出的进度位置
+                thumbRadius + progress * effectiveWidth
+            }
 
             // 绘制背景轨道
             drawRoundRect(
@@ -193,11 +200,16 @@ private fun ModernSliderTrack(
             )
 
             // 绘制已激活轨道（渐变）
-            val gradientWidth = max(0f, (thumbPosition - thumbRadius))
-            if (gradientWidth > 0) {
+            val progressWidth = if (isDragging) {
+                // 拖动时根据拖动位置计算
+                (thumbPosition - thumbRadius).coerceAtLeast(0f)
+            } else {
+                thumbRadius + progress * effectiveWidth - thumbRadius
+            }
+            if (progressWidth > 0) {
                 drawRoundRect(
                     topLeft = Offset(thumbRadius, centerY - trackHeight / 2),
-                    size = androidx.compose.ui.geometry.Size(gradientWidth, trackHeight),
+                    size = androidx.compose.ui.geometry.Size(progressWidth, trackHeight),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(trackHeight / 2),
                     style = Stroke(width = trackHeight),
                     brush = Brush.horizontalGradient(
@@ -214,40 +226,28 @@ private fun ModernSliderTrack(
             drawCircle(
                 color = GlowColor.copy(alpha = 0.3f),
                 radius = thumbRadius + shadowOffset,
-                center = Offset(
-                    if (isDragging) thumbRadius + dragPosition else thumbPosition,
-                    centerY
-                )
+                center = Offset(thumbPosition, centerY)
             )
 
             // 绘制滑块外圈
             drawCircle(
                 color = if (isDragging) Primary.copy(alpha = 0.3f) else Color.Transparent,
                 radius = thumbRadius * 1.3f,
-                center = Offset(
-                    if (isDragging) thumbRadius + dragPosition else thumbPosition,
-                    centerY
-                )
+                center = Offset(thumbPosition, centerY)
             )
 
             // 绘制滑块
             drawCircle(
                 color = if (isDragging) Primary else Color.White,
                 radius = thumbRadius,
-                center = Offset(
-                    if (isDragging) thumbRadius + dragPosition else thumbPosition,
-                    centerY
-                )
+                center = Offset(thumbPosition, centerY)
             )
 
             // 绘制滑块内圈
             drawCircle(
                 color = if (isDragging) Color.White else Primary,
                 radius = thumbRadius * 0.5f,
-                center = Offset(
-                    if (isDragging) thumbRadius + dragPosition else thumbPosition,
-                    centerY
-                )
+                center = Offset(thumbPosition, centerY)
             )
         }
     }

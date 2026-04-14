@@ -142,9 +142,8 @@ private fun PlaybackControls(
         ControlButton(
             onClick = onPlayPause,
             text = if (isPlaying) "⏸" else "▶️",
-            modifier = Modifier.size(60.dp),
-            contentDescription = "播放/暂停",
-            fontSize = 24.sp
+            modifier = Modifier.size(50.dp),
+            contentDescription = "播放/暂停"
         )
 
         Spacer(modifier = Modifier.width(10.dp))

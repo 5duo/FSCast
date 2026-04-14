@@ -40,24 +40,6 @@ fun ModernCastingControlCard(
 ) {
     ModernCard(modifier = modifier) {
         Column {
-            // 标题
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "悬浮窗控制",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = OnSurface,
-                    fontWeight = FontWeight.Bold
-                )
-                // 状态指示灯
-                StatusIndicator(isWindowVisible)
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
             // 状态信息
             StatusCard(
                 title = "投屏状态",

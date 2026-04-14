@@ -197,7 +197,7 @@ private fun ModernQuickAction(
 ) {
     Surface(
         onClick = onClick,
-        modifier = modifier.height(60.dp),
+        modifier = modifier.height(72.dp),
         shape = RoundedCornerShape(12.dp),
         color = Primary.copy(alpha = 0.15f),
         tonalElevation = 0.dp
@@ -205,18 +205,18 @@ private fun ModernQuickAction(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(8.dp),
+                .padding(vertical = 12.dp, horizontal = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
             Text(
                 text = icon,
-                style = MaterialTheme.typography.titleLarge
+                style = MaterialTheme.typography.titleMedium
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelMedium,
                 color = OnSurfaceVariant
             )
         }

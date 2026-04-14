@@ -60,7 +60,7 @@ fun ModernPlaybackControlCard(
                     fontWeight = FontWeight.Bold
                 )
                 // 播放状态指示器
-                StatusIndicator(isPlaying = isPlaying)
+                StatusIndicator(isPlaying = isPlaying, hasContent = duration > 0)
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -92,7 +92,7 @@ fun ModernPlaybackControlCard(
  * 状态指示器
  */
 @Composable
-private fun StatusIndicator(isPlaying: Boolean) {
+private fun StatusIndicator(isPlaying: Boolean, hasContent: Boolean) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val scale by infiniteTransition.animateFloat(
         initialValue = 1f,
@@ -104,6 +104,15 @@ private fun StatusIndicator(isPlaying: Boolean) {
         label = "scale"
     )
 
+    // 状态文字：根据是否有内容和播放状态决定
+    val statusText = when {
+        !hasContent -> "已停止"
+        isPlaying -> "播放中"
+        else -> "已暂停"
+    }
+
+    val isActive = hasContent && isPlaying
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
@@ -113,15 +122,15 @@ private fun StatusIndicator(isPlaying: Boolean) {
                 .size(8.dp)
                 .scale(scale)
                 .background(
-                    color = if (isPlaying) Success else SurfaceVariant,
+                    color = if (isActive) Success else SurfaceVariant,
                     shape = CircleShape
                 )
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
-            text = if (isPlaying) "播放中" else "已暂停",
+            text = statusText,
             style = MaterialTheme.typography.bodySmall,
-            color = if (isPlaying) Success else OnSurfaceVariant
+            color = if (isActive) Success else OnSurfaceVariant
         )
     }
 }
@@ -225,7 +234,7 @@ private fun ModernPlaybackControls(
         // 播放/暂停（统一风格）
         ModernControlButton(
             onClick = onPlayPause,
-            icon = if (isPlaying) "⏸" else "▶",
+            icon = if (isPlaying) "❚❚" else "▶",
             contentDescription = if (isPlaying) "暂停" else "播放",
             size = 50.dp
         )
