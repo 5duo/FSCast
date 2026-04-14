@@ -14,6 +14,9 @@
 .cxx
 local.properties
 
+# Claude Code工作目录
+.claude/
+
 # Kotlin
 *.kotlin_module
 *.kt.original
