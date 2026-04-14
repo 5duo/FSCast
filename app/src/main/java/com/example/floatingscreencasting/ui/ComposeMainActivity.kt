@@ -25,7 +25,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
-import com.example.floatingscreencasting.audio.AudioOutputHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -53,7 +52,6 @@ class ComposeMainActivity : AppCompatActivity() {
     private lateinit var displayManager: DisplayManager
     private var videoPresentation: VideoPresentation? = null
     private lateinit var preferencesManager: PreferencesManager
-    private lateinit var audioOutputHelper: AudioOutputHelper
 
     // DLNA服务
     private lateinit var dlnaService: DlnaDmrService
@@ -160,7 +158,6 @@ class ComposeMainActivity : AppCompatActivity() {
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
 
         preferencesManager = PreferencesManager(this)
-        audioOutputHelper = AudioOutputHelper(this)
 
         initializeDisplays()
         loadSettings()
@@ -197,8 +194,7 @@ class ComposeMainActivity : AppCompatActivity() {
                     onCenterClick = { centerWindow() },
                     onMaximizeClick = { maximizeWindow() },
                     onDefaultClick = { restoreDefault() },
-                    onCustomClick = { saveCustomConfig() },
-                    onCheckBluetooth = { checkBluetooth() }
+                    onCustomClick = { saveCustomConfig() }
                 )
             }
         }
@@ -223,8 +219,7 @@ class ComposeMainActivity : AppCompatActivity() {
         onCenterClick: () -> Unit,
         onMaximizeClick: () -> Unit,
         onDefaultClick: () -> Unit,
-        onCustomClick: () -> Unit,
-        onCheckBluetooth: () -> Unit
+        onCustomClick: () -> Unit
     ) {
         Scaffold(
             topBar = {
@@ -292,13 +287,6 @@ class ComposeMainActivity : AppCompatActivity() {
                     onMaximizeClick = onMaximizeClick,
                     onDefaultClick = onDefaultClick,
                     onCustomClick = onCustomClick,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                // 音频输出卡片
-                ModernAudioCard(
-                    currentAudioOutput = uiState.currentAudioOutput,
-                    onCheckBluetooth = onCheckBluetooth,
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -549,19 +537,6 @@ class ComposeMainActivity : AppCompatActivity() {
             windowAlpha = defaultAlpha
         }
         saveSettings()
-    }
-
-    private fun checkBluetooth() {
-        val hasConnectedA2dp = audioOutputHelper.hasConnectedA2dpDevice()
-        val currentOutput = audioOutputHelper.getCurrentAudioOutputDescription()
-
-        _uiState.value = uiState.value.copy(currentAudioOutput = currentOutput)
-
-        if (hasConnectedA2dp) {
-            Toast.makeText(this, "已连接蓝牙音频设备", Toast.LENGTH_SHORT).show()
-        } else {
-            Toast.makeText(this, "未连接蓝牙设备", Toast.LENGTH_SHORT).show()
-        }
     }
 
     // ==================== 初始化和辅助方法 ====================

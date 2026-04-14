@@ -21,7 +21,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.Player
 import com.example.floatingscreencasting.R
-import com.example.floatingscreencasting.audio.AudioOutputHelper
 import com.example.floatingscreencasting.databinding.ActivityMainBinding
 import com.example.floatingscreencasting.dlna.DlnaDmrService
 import com.example.floatingscreencasting.events.MuteEvent
@@ -43,7 +42,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var displayManager: DisplayManager
     private var videoPresentation: VideoPresentation? = null
     private lateinit var preferencesManager: PreferencesManager
-    private lateinit var audioOutputHelper: AudioOutputHelper
 
     // ExoPlayer实例 - 在MainActivity中创建和管理
     private var exoPlayer: androidx.media3.exoplayer.ExoPlayer? = null
@@ -150,7 +148,6 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         preferencesManager = PreferencesManager(this)
-        audioOutputHelper = AudioOutputHelper(this)
 
         setupToolbar()
         initializeDisplays()
@@ -159,10 +156,6 @@ class MainActivity : AppCompatActivity() {
         setupControls()
         setupAspectRatioButtons()
         setupQuickActions()
-        setupAudioOutput()
-
-        // 更新当前音频输出显示
-        updateCurrentAudioOutput()
 
         // 注册播放错误广播接收器
         registerReceiver(playbackErrorReceiver, IntentFilter("com.example.floatingscreencasting.PLAYBACK_ERROR"))
@@ -604,51 +597,6 @@ class MainActivity : AppCompatActivity() {
             binding.sizeSlider.value = width.toFloat()
             binding.positionXSlider.value = 0f
             binding.positionYSlider.value = ((maxHeight - height) / 2).toFloat()
-        }
-    }
-
-    /**
-     * 设置音频输出控制
-     */
-    private fun setupAudioOutput() {
-        binding.audioOutputButton.setOnClickListener {
-            // 检查蓝牙状态
-            if (!audioOutputHelper.isBluetoothEnabled()) {
-                Toast.makeText(this, "蓝牙未开启，请先在系统设置中开启蓝牙", Toast.LENGTH_LONG).show()
-                // 尝试打开蓝牙设置
-                audioOutputHelper.openBluetoothSettings()
-                return@setOnClickListener
-            }
-
-            // 检查A2DP连接状态
-            if (audioOutputHelper.hasConnectedA2dpDevice()) {
-                Toast.makeText(this, "蓝牙音频已连接，投屏声音将自动输出到蓝牙设备", Toast.LENGTH_LONG).show()
-            } else {
-                AlertDialog.Builder(this)
-                    .setTitle("蓝牙音频")
-                    .setMessage("未检测到已连接的蓝牙音频设备。\n\n请先在系统设置中连接蓝牙耳机或音箱，然后投屏声音会自动输出到蓝牙设备。")
-                    .setPositiveButton("打开蓝牙设置") { _, _ ->
-                        audioOutputHelper.openBluetoothSettings()
-                    }
-                    .setNegativeButton("取消", null)
-                    .show()
-            }
-
-            // 更新显示
-            updateCurrentAudioOutput()
-        }
-    }
-
-    /**
-     * 更新当前音频输出显示
-     */
-    @SuppressLint("NewApi")
-    private fun updateCurrentAudioOutput() {
-        try {
-            val output = audioOutputHelper.getCurrentAudioOutputDescription()
-            binding.currentAudioOutput.text = output
-        } catch (e: Exception) {
-            binding.currentAudioOutput.text = "系统扬声器"
         }
     }
 

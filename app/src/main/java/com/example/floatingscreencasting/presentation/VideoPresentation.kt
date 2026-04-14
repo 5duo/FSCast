@@ -39,9 +39,6 @@ class VideoPresentation(
     // 音频路由管理器
     private var audioRouteManager: com.example.floatingscreencasting.audio.AudioRouteManager? = null
 
-    // 高级音频路由管理器（反射方案）
-    private var advancedAudioRouteManager: com.example.floatingscreencasting.audio.AdvancedAudioRouteManager? = null
-
     // 静音状态
     private var isMuted = true
 
@@ -420,22 +417,6 @@ class VideoPresentation(
         // 设置音频路由到蓝牙设备（如果已连接）
         audioRouteManager?.setAudioRouteToBluetooth()
         android.util.Log.d("VideoPresentation", "音频路由已配置")
-
-        // 尝试高级音频路由（反射方案）
-        advancedAudioRouteManager = com.example.floatingscreencasting.audio.AdvancedAudioRouteManager(outerContext)
-        android.util.Log.d("VideoPresentation", "========== 尝试高级音频路由 ==========")
-        android.util.Log.d("VideoPresentation", advancedAudioRouteManager?.getAllAudioDeviceInfo() ?: "无法获取设备信息")
-
-        // 尝试多种路由方法
-        val reflectionSuccess = advancedAudioRouteManager?.trySetBluetoothA2dpDevice() ?: false
-        android.util.Log.d("VideoPresentation", "反射路由结果: $reflectionSuccess")
-
-        if (!reflectionSuccess) {
-            val focusSuccess = advancedAudioRouteManager?.requestAudioFocusAndSetRoute() ?: false
-            android.util.Log.d("VideoPresentation", "音频焦点路由结果: $focusSuccess")
-        }
-
-        android.util.Log.d("VideoPresentation", "========== 高级音频路由尝试完成 ==========")
 
         // 处理特殊平台的URL签名
         val finalUri = when {
