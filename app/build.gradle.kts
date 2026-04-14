@@ -15,8 +15,8 @@ android {
         applicationId = "com.example.floatingscreencasting"
         minSdk = 30
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 100
+        versionName = "0.1.0-beta"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -29,6 +29,21 @@ android {
                 "proguard-rules.pro"
             )
         }
+        debug {
+            // Debug版本不需要后缀
+        }
+    }
+
+    // 自定义APK输出文件名
+    applicationVariants.all {
+        val variant = this
+        variant.outputs
+            .map { it as com.android.build.gradle.internal.api.BaseVariantOutputImpl }
+            .forEach { output ->
+                val versionName = "0.1.0-beta"
+                val buildType = buildType.name
+                output.outputFileName = "FSCast-${versionName}.apk"
+            }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
