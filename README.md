@@ -250,6 +250,15 @@ android:screenOrientation="sensorLandscape"
 
 ---
 
+## 📚 技术文档
+
+详细的技术文档和实现说明请查看 [docs/](./docs/) 目录：
+
+- **[DLNA发现机制详解](./docs/DLNA_DISCOVERY_MECHANISM.md)** - SSDP协议工作原理
+- **[代理移除指南](./docs/PROXY_REMOVAL_GUIDE.md)** - DLNA代理设置移除
+- **[B站WBI签名实现](./docs/BILIBILI_WBI_IMPLEMENTATION.md)** - Bilibili对接方案
+- **[音频路由解决方案](./docs/audio_routing_solution.md)** - 车载音频输出研究
+
 ## 📂 项目结构
 
 ```
