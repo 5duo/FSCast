@@ -13,3 +13,31 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Kotlin
+*.kotlin_module
+*.kt.original
+
+# 临时测试脚本
+setup_telnet_*.bat
+temp_*.sh
+*.tmp
+
+# Frida脚本（研究工具）
+frida/
+
+# 研究文档
+memory/
+
+# 临时日志
+*.log
+*.output
+
+# 系统文件
+Thumbs.db
+.DS_Store
+
+# 压缩文件
+*.zip
+*.tar.gz
+*.rar
