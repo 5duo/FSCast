@@ -18,8 +18,10 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.example.floatingscreencasting.cache.VideoCacheManager
 import com.example.floatingscreencasting.R
 import com.example.floatingscreencasting.databinding.PresentationVideoBinding
+import com.example.floatingscreencasting.history.PlaybackHistoryManager
 import java.net.CookieManager
 
 /**
@@ -38,6 +40,9 @@ class VideoPresentation(
 
     // 音频路由管理器
     private var audioRouteManager: com.example.floatingscreencasting.audio.AudioRouteManager? = null
+
+    // 播放历史管理器
+    private val historyManager: PlaybackHistoryManager = PlaybackHistoryManager.getInstance(outerContext)
 
     // 静音状态
     private var isMuted = true
@@ -345,7 +350,28 @@ class VideoPresentation(
                     override fun onRenderedFirstFrame() {
                         android.util.Log.d("VideoPresentation", "首帧已渲染")
                     }
+
+                    override fun onPositionDiscontinuity(
+                        oldPosition: androidx.media3.common.Player.PositionInfo,
+                        newPosition: androidx.media3.common.Player.PositionInfo,
+                        reason: Int
+                    ) {
+                        // 播放位置变化时更新历史记录
+                        if (reason == androidx.media3.common.Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
+                            updatePlaybackHistory()
+                        }
+                    }
                 })
+
+                // 定期保存播放进度（每10秒）
+                Handler(Looper.getMainLooper()).postDelayed(object : Runnable {
+                    override fun run() {
+                        if (isPlaying()) {
+                            updatePlaybackHistory()
+                        }
+                        Handler(Looper.getMainLooper()).postDelayed(this, 10000)
+                    }
+                }, 10000)
             }
 
         android.util.Log.d("VideoPresentation", "ExoPlayer创建完成: $exoPlayer")
@@ -449,19 +475,18 @@ class VideoPresentation(
 
         android.util.Log.d("VideoPresentation", "最终使用的URL: ${if (finalUri != uri) "已修复签名" else "原始URL"}")
 
+        // 保存播放记录
+        val title = extractTitleFromUri(finalUri)
+        historyManager.savePlayback(finalUri, title, 0, 0)
+
         // 获取对应平台的请求头
         val headers = getHeadersForUrl(finalUri)
         android.util.Log.d("VideoPresentation", "使用请求头: ${headers.keys.joinToString()}")
 
-        // 创建HTTP数据源工厂（带完整请求头）
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(30 * 1000)
-            .setReadTimeoutMs(30 * 1000)
-            .setDefaultRequestProperties(headers)
-
-        val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
-        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
+        // 使用视频缓存管理器创建缓存数据源
+        val cacheManager = VideoCacheManager.getInstance(context)
+        val cachedDataSourceFactory = cacheManager.createCachedDataSourceFactory(context, headers)
+        val mediaSourceFactory = DefaultMediaSourceFactory(cachedDataSourceFactory)
 
         // 创建新的ExoPlayer实例
         releasePlayer()
@@ -559,7 +584,28 @@ class VideoPresentation(
                     override fun onRenderedFirstFrame() {
                         android.util.Log.d("VideoPresentation", "首帧已渲染")
                     }
+
+                    override fun onPositionDiscontinuity(
+                        oldPosition: androidx.media3.common.Player.PositionInfo,
+                        newPosition: androidx.media3.common.Player.PositionInfo,
+                        reason: Int
+                    ) {
+                        // 播放位置变化时更新历史记录
+                        if (reason == androidx.media3.common.Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
+                            updatePlaybackHistory()
+                        }
+                    }
                 })
+
+                // 定期保存播放进度（每10秒）
+                Handler(Looper.getMainLooper()).postDelayed(object : Runnable {
+                    override fun run() {
+                        if (isPlaying()) {
+                            updatePlaybackHistory()
+                        }
+                        Handler(Looper.getMainLooper()).postDelayed(this, 10000)
+                    }
+                }, 10000)
             }
 
         // 准备并播放
@@ -731,5 +777,50 @@ class VideoPresentation(
             }
             else -> super.onKeyDown(keyCode, event)
         }
+    }
+
+    /**
+     * 更新播放历史记录
+     */
+    private fun updatePlaybackHistory() {
+        if (currentUri.isEmpty()) return
+
+        val player = exoPlayer ?: return
+        val currentPosition = player.currentPosition
+        val duration = player.duration
+
+        if (duration > 0) {
+            val title = extractTitleFromUri(currentUri)
+            historyManager.updateProgress(currentUri, currentPosition, duration)
+            android.util.Log.d("VideoPresentation", "更新播放历史: $title, 进度: ${currentPosition / 1000}s / ${duration / 1000}s")
+        }
+    }
+
+    /**
+     * 从URI中提取标题
+     */
+    private fun extractTitleFromUri(uri: String): String {
+        return when {
+            uri.contains("bilibili") -> "哔哩哔哩"
+            uri.contains("iqiyi") -> "爱奇艺"
+            uri.contains("v.qq.com") -> "腾讯视频"
+            uri.contains("youku") -> "优酷"
+            uri.contains("mgtv") -> "芒果TV"
+            else -> "在线视频"
+        }
+    }
+
+    /**
+     * 获取最后播放的记录
+     */
+    fun getLastPlayed(): PlaybackHistoryManager.PlaybackRecord? {
+        return historyManager.getLastPlayed()
+    }
+
+    /**
+     * 检查是否有可以继续观看的内容
+     */
+    fun hasContinueWatching(): Boolean {
+        return historyManager.hasContinueWatching()
     }
 }

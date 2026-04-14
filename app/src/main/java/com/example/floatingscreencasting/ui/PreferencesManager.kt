@@ -66,7 +66,8 @@ class PreferencesManager(context: Context) {
         var width: Int = DEFAULT_WIDTH,
         var height: Int = DEFAULT_HEIGHT,
         var alpha: Int = DEFAULT_ALPHA,
-        var aspectRatio: String = DEFAULT_ASPECT_RATIO
+        var aspectRatio: String = DEFAULT_ASPECT_RATIO,
+        var displayId: Int = 2  // 默认使用Display ID 2（驾驶屏）
     )
 
     /**

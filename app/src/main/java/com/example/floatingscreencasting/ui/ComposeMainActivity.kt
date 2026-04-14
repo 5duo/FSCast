@@ -38,6 +38,8 @@ import com.example.floatingscreencasting.events.MuteEvent
 import com.example.floatingscreencasting.presentation.VideoPresentation
 import com.example.floatingscreencasting.ui.composable.*
 import com.example.floatingscreencasting.ui.theme.FloatingScreenCastingTheme
+import com.example.floatingscreencasting.ui.composable.DisplayInfo
+import com.example.floatingscreencasting.history.PlaybackHistoryManager
 import kotlinx.coroutines.launch
 import org.greenrobot.eventbus.EventBus
 import org.greenrobot.eventbus.Subscribe
@@ -52,6 +54,11 @@ class ComposeMainActivity : AppCompatActivity() {
     private lateinit var displayManager: DisplayManager
     private var videoPresentation: VideoPresentation? = null
     private lateinit var preferencesManager: PreferencesManager
+
+    // 播放历史管理器（延迟初始化）
+    private val historyManager: PlaybackHistoryManager by lazy {
+        PlaybackHistoryManager.getInstance(this)
+    }
 
     // DLNA服务
     private lateinit var dlnaService: DlnaDmrService
@@ -162,6 +169,7 @@ class ComposeMainActivity : AppCompatActivity() {
         initializeDisplays()
         loadSettings()
         initializeDlnaService()
+        updateContinueWatchingStatus()
 
         // 注册广播接收器
         registerReceiver(playbackErrorReceiver, IntentFilter("com.example.floatingscreencasting.PLAYBACK_ERROR"))
@@ -194,7 +202,9 @@ class ComposeMainActivity : AppCompatActivity() {
                     onCenterClick = { centerWindow() },
                     onMaximizeClick = { maximizeWindow() },
                     onDefaultClick = { restoreDefault() },
-                    onCustomClick = { saveCustomConfig() }
+                    onCustomClick = { saveCustomConfig() },
+                    onDisplayChange = { displayId -> changeDisplay(displayId) },
+                    onContinueWatching = { continueWatching() }
                 )
             }
         }
@@ -219,7 +229,9 @@ class ComposeMainActivity : AppCompatActivity() {
         onCenterClick: () -> Unit,
         onMaximizeClick: () -> Unit,
         onDefaultClick: () -> Unit,
-        onCustomClick: () -> Unit
+        onCustomClick: () -> Unit,
+        onDisplayChange: (Int) -> Unit,
+        onContinueWatching: () -> Unit
     ) {
         Scaffold(
             topBar = {
@@ -246,11 +258,27 @@ class ComposeMainActivity : AppCompatActivity() {
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                // 继续观看卡片（如果有可继续观看的内容）
+                if (uiState.hasContinueWatching) {
+                    ContinueWatchingCard(
+                        hasContinueWatching = uiState.hasContinueWatching,
+                        title = uiState.lastPlayedTitle,
+                        progress = uiState.lastPlayedProgress,
+                        onContinueWatching = onContinueWatching,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
                 // 悬浮窗控制卡片
                 ModernCastingControlCard(
                     isWindowVisible = uiState.isWindowVisible,
                     castingStatus = uiState.castingStatus,
+                    selectedDisplayId = uiState.selectedDisplayId,
+                    availableDisplays = uiState.availableDisplays,
                     onToggleWindow = onToggleWindow,
+                    onDisplayChange = onDisplayChange,
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -309,12 +337,13 @@ class ComposeMainActivity : AppCompatActivity() {
     private fun toggleWindow() {
         lifecycleScope.launch {
             if (videoPresentation == null) {
-                // 获取Display对象
-                val display = displayManager.getDisplay(drivingDisplayId)
+                // 使用用户选择的Display ID
+                val selectedDisplayId = uiState.value.selectedDisplayId
+                val display = displayManager.getDisplay(selectedDisplayId)
                 if (display != null) {
                     showPresentationOnDisplay(display)
                 } else {
-                    // 如果固定Display ID不可用，查找Presentation Display
+                    // 如果选择的Display不可用，查找其他可用Display
                     val presentationDisplay = displayManager.displays.firstOrNull {
                         isPresentationDisplay(it)
                     }
@@ -539,42 +568,115 @@ class ComposeMainActivity : AppCompatActivity() {
         saveSettings()
     }
 
-    // ==================== 初始化和辅助方法 ====================
+    private fun changeDisplay(displayId: Int) {
+        _uiState.value = uiState.value.copy(selectedDisplayId = displayId)
+        // 如果当前有Presentation，需要重新创建到新屏幕
+        if (videoPresentation != null) {
+            videoPresentation?.dismiss()
+            videoPresentation = null
+            _uiState.value = uiState.value.copy(isWindowVisible = false)
 
+            // 在新屏幕上创建Presentation
+            lifecycleScope.launch {
+                val display = displayManager.getDisplay(displayId)
+                if (display != null) {
+                    showPresentationOnDisplay(display)
+                }
+            }
+        }
+        saveSettings()
+    }
+
+    /**
+     * 更新继续观看状态
+     */
+    private fun updateContinueWatchingStatus() {
+        val lastPlayed = historyManager.getLastPlayed()
+        if (lastPlayed != null && historyManager.hasContinueWatching()) {
+            _uiState.value = uiState.value.copy(
+                hasContinueWatching = true,
+                lastPlayedTitle = lastPlayed.title,
+                lastPlayedProgress = lastPlayed.getProgressPercent()
+            )
+            Log.d("ComposeMainActivity", "继续观看可用: ${lastPlayed.title}, 进度: ${lastPlayed.getProgressPercent()}%")
+        } else {
+            _uiState.value = uiState.value.copy(
+                hasContinueWatching = false,
+                lastPlayedTitle = "",
+                lastPlayedProgress = 0
+            )
+        }
+    }
+
+    /**
+     * 继续观看上次的视频
+     */
+    private fun continueWatching() {
+        val lastPlayed = historyManager.getLastPlayed()
+        if (lastPlayed != null) {
+            lifecycleScope.launch {
+                // 确保浮窗已显示
+                if (videoPresentation == null) {
+                    val selectedDisplayId = uiState.value.selectedDisplayId
+                    val display = displayManager.getDisplay(selectedDisplayId)
+                    if (display != null) {
+                        showPresentationOnDisplay(display)
+                        delay(500) // 等待Presentation初始化
+                    }
+                }
+
+                // 播放视频
+                videoPresentation?.playMedia(lastPlayed.uri)
+
+                // 跳转到上次播放的位置
+                if (lastPlayed.positionMs > 0) {
+                    videoPresentation?.seekTo(lastPlayed.positionMs)
+                }
+
+                Log.d("ComposeMainActivity", "继续观看: ${lastPlayed.title}, 从 ${lastPlayed.positionMs / 1000}s 开始")
+            }
+        } else {
+            Toast.makeText(this, "没有可继续观看的视频", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // ==================== 初始化和辅助方法 ====================
     private fun initializeDisplays() {
         displayManager = getSystemService(DisplayManager::class.java)
         displayManager.registerDisplayListener(displayListener, Handler(Looper.getMainLooper()))
 
         val allDisplays = displayManager.displays
         Log.d("ComposeMainActivity", "系统共有 ${allDisplays.size} 个显示设备")
+
+        // 更新可用屏幕列表到UI状态
+        val displayInfoList = allDisplays.map { display ->
+            com.example.floatingscreencasting.ui.composable.DisplayInfo(id = display.displayId, name = display.name)
+        }
+        _uiState.value = uiState.value.copy(availableDisplays = displayInfoList)
+
         allDisplays.forEach { display ->
             Log.d("ComposeMainActivity", "  Display ID: ${display.displayId}, Name: ${display.name}")
         }
 
-        var targetDisplay: Display? = null
+        // 自动在用户选择的屏幕上打开浮窗
+        lifecycleScope.launch {
+            delay(500) // 等待UI初始化完成
+            val selectedDisplayId = uiState.value.selectedDisplayId
+            val targetDisplay = displayManager.getDisplay(selectedDisplayId)
 
-        // 优先尝试固定Display ID
-        targetDisplay = displayManager.getDisplay(drivingDisplayId)
-        Log.d("ComposeMainActivity", "尝试获取Display ID $drivingDisplayId: ${if (targetDisplay != null) "成功" else "失败"}")
-
-        if (targetDisplay == null) {
-            // 回退到查找Presentation Display
-            for (display in allDisplays) {
-                if (isPresentationDisplay(display)) {
-                    targetDisplay = display
-                    Log.d("ComposeMainActivity", "找到Presentation Display: ${display.displayId}")
-                    break
+            if (targetDisplay != null) {
+                Log.d("ComposeMainActivity", "应用启动：自动在Display $selectedDisplayId 上打开浮窗")
+                showPresentationOnDisplay(targetDisplay)
+            } else {
+                Log.w("ComposeMainActivity", "选择的Display $selectedDisplayId 不可用，尝试使用其他可用Display")
+                // 如果选择的Display不可用，查找其他可用Display
+                val presentationDisplay = allDisplays.firstOrNull {
+                    isPresentationDisplay(it)
+                }
+                if (presentationDisplay != null) {
+                    showPresentationOnDisplay(presentationDisplay)
                 }
             }
-        }
-
-        targetDisplay?.let {
-            // 优先使用固定Display ID 2的Display对象
-            val display = displayManager.getDisplay(drivingDisplayId) ?: it
-            Log.d("ComposeMainActivity", "准备创建Presentation，使用Display ID: ${display.displayId}")
-            showPresentationOnDisplay(display)
-        } ?: run {
-            Log.e("ComposeMainActivity", "没有找到合适的显示设备")
         }
     }
 
@@ -660,6 +762,15 @@ class ComposeMainActivity : AppCompatActivity() {
                 }
             }
 
+            onPlay = {
+                Log.d("ComposeMainActivity", "收到恢复播放回调")
+                try {
+                    videoPresentation?.play()
+                } catch (e: Exception) {
+                    Log.e("ComposeMainActivity", "恢复播放失败", e)
+                }
+            }
+
             onSeekMedia = { target ->
                 Log.d("ComposeMainActivity", "收到Seek回调: target='$target'")
                 try {
@@ -737,7 +848,8 @@ class ComposeMainActivity : AppCompatActivity() {
             windowY = savedSettings.y,
             windowWidth = savedSettings.width,
             windowHeight = savedSettings.height,
-            windowAlpha = savedSettings.alpha / 100f
+            windowAlpha = savedSettings.alpha / 100f,
+            selectedDisplayId = savedSettings.displayId
         )
 
         videoPresentation?.apply {
@@ -756,7 +868,8 @@ class ComposeMainActivity : AppCompatActivity() {
             width = uiState.value.windowWidth,
             height = uiState.value.windowHeight,
             alpha = (uiState.value.windowAlpha * 100).toInt(),
-            aspectRatio = uiState.value.aspectRatio.displayName
+            aspectRatio = uiState.value.aspectRatio.displayName,
+            displayId = uiState.value.selectedDisplayId
         )
         preferencesManager.windowPosition = settings
     }
@@ -860,5 +973,12 @@ data class MainUiState(
     val windowWidth: Int = 434,
     val windowHeight: Int = 244,
     val windowAlpha: Float = 0.41f,
-    val currentAudioOutput: String = "系统扬声器"
+    val currentAudioOutput: String = "系统扬声器",
+    val selectedDisplayId: Int = 2,
+    val availableDisplays: List<DisplayInfo> = emptyList(),
+    val hasContinueWatching: Boolean = false,
+    val lastPlayedTitle: String = "",
+    val lastPlayedProgress: Int = 0
 )
+
+// DisplayInfo已定义在com.example.floatingscreencasting.ui.composable包中

@@ -16,13 +16,26 @@ import androidx.compose.ui.unit.dp
 import com.example.floatingscreencasting.ui.theme.*
 
 /**
+ * 屏幕信息数据类
+ */
+data class DisplayInfo(
+    val id: Int,
+    val name: String
+) {
+    override fun toString(): String = "$name (ID: $id)"
+}
+
+/**
  * 现代化悬浮窗控制卡片
  */
 @Composable
 fun ModernCastingControlCard(
     isWindowVisible: Boolean,
     castingStatus: String,
+    selectedDisplayId: Int,
+    availableDisplays: List<DisplayInfo>,
     onToggleWindow: () -> Unit,
+    onDisplayChange: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     ModernCard(modifier = modifier) {
@@ -54,6 +67,73 @@ fun ModernCastingControlCard(
             )
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            // 屏幕选择
+            if (availableDisplays.isNotEmpty()) {
+                Text(
+                    text = "投屏屏幕",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = OnSurface,
+                    fontWeight = FontWeight.SemiBold
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                var expanded by remember { mutableStateOf(false) }
+                val selectedDisplay = availableDisplays.firstOrNull { it.id == selectedDisplayId }
+
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    Surface(
+                        onClick = { expanded = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        color = SurfaceVariant.copy(alpha = 0.3f),
+                        tonalElevation = 0.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "📱 ${selectedDisplay?.toString() ?: "未选择"}",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = OnSurface
+                            )
+                            Text(
+                                text = "▼",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = OnSurfaceVariant
+                            )
+                        }
+                    }
+
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false },
+                        modifier = Modifier.fillMaxWidth(0.9f)
+                    ) {
+                        availableDisplays.forEach { display ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(display.toString())
+                                },
+                                onClick = {
+                                    onDisplayChange(display.id)
+                                    expanded = false
+                                },
+                                trailingIcon = if (display.id == selectedDisplayId) {
+                                    { Text("✓", color = Primary) }
+                                } else null
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+            }
 
             // 控制按钮
             Row(

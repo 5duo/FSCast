@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose) // Kotlin 2.0+需要的Compose Compiler插件
+    kotlin("plugin.serialization") version "2.0.21" // Serialization插件
 }
 
 android {
@@ -67,6 +68,10 @@ dependencies {
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.ui)
     implementation(libs.media3.exoplayer.hls)  // HLS支持（m3u8格式）
+    implementation(libs.media3.datasource.okhttp)  // OkHttp数据源
+
+    // OkHttp (用于视频缓存)
+    implementation(libs.okhttp)
 
     // ConstraintLayout
     implementation(libs.constraintlayout)
@@ -81,6 +86,9 @@ dependencies {
     // Lifecycle
     implementation(libs.lifecycle.runtime)
     implementation(libs.lifecycle.viewmodel)
+
+    // Serialization
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     // NanoHTTPD (DLNA HTTP服务器)
     implementation(libs.nanohttpd)

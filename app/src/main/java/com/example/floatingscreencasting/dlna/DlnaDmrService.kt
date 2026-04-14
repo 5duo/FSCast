@@ -154,8 +154,9 @@ class DlnaDmrService(private val context: Context) {
         Log.d(TAG, "处理播放命令: $uri")
 
         if (uri.isBlank()) {
-            // 恢复播放
+            // 恢复播放（暂停后再播放的情况）
             onCastingStateChanged?.invoke(true, "投屏中")
+            onPlay?.invoke()  // 调用play恢复播放
             return
         }
 
@@ -219,6 +220,7 @@ class DlnaDmrService(private val context: Context) {
     var onPlayMedia: ((String) -> Unit)? = null
     var onStopMedia: (() -> Unit)? = null
     var onPauseMedia: (() -> Unit)? = null
+    var onPlay: (() -> Unit)? = null  // 恢复播放回调
     var onSeekMedia: ((String) -> Unit)? = null
     var onGetDuration: (() -> Long)? = null
     var onGetPosition: (() -> Long)? = null
