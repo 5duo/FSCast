@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 循环跳跃音符动画 -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:ordering="sequentially">
+
+    <!-- 向上跳跃 -->
+    <set android:ordering="together">
+        <objectAnimator
+            android:propertyName="translateY"
+            android:duration="400"
+            android:valueTo="-20"
+            android:valueType="floatType"
+            android:interpolator="@android:anim/decelerate_interpolator" />
+        <objectAnimator
+            android:propertyName="scaleX"
+            android:duration="200"
+            android:valueTo="1.15"
+            android:valueType="floatType"
+            android:interpolator="@android:anim/decelerate_interpolator" />
+        <objectAnimator
+            android:propertyName="scaleY"
+            android:duration="200"
+            android:valueTo="1.15"
+            android:valueType="floatType"
+            android:interpolator="@android:anim/decelerate_interpolator" />
+        <objectAnimator
+            android:propertyName="rotation"
+            android:duration="400"
+            android:valueTo="15"
+            android:valueType="floatType"
+            android:interpolator="@android:anim/accelerate_decelerate_interpolator" />
+    </set>
+
+    <!-- 下落 -->
+    <set android:ordering="together">
+        <objectAnimator
+            android:propertyName="translateY"
+            android:duration="400"
+            android:valueTo="0"
+            android:valueType="floatType"
+            android:interpolator="@android:anim/accelerate_interpolator" />
+        <objectAnimator
+            android:propertyName="scaleX"
+            android:duration="200"
+            android:valueTo="1.0"
+            android:valueType="floatType"
+            android:interpolator="@android:anim/decelerate_interpolator" />
+        <objectAnimator
+            android:propertyName="scaleY"
+            android:duration="200"
+            android:valueTo="1.0"
+            android:valueType="floatType"
+            android:interpolator="@android:anim/decelerate_interpolator" />
+        <objectAnimator
+            android:propertyName="rotation"
+            android:duration="400"
+            android:valueTo="0"
+            android:valueType="floatType"
+            android:interpolator="@android:anim/decelerate_interpolator" />
+    </set>
+
+</set>

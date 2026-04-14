@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 跳跃音符动画 -->
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_music_note">
+    <target
+        android:name="note_root"
+        android:animation="@animator/jumping_note" />
+</animated-vector>

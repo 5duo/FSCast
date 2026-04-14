@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 向上跳跃动画 -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:ordering="together">
+    <objectAnimator
+        android:propertyName="translateY"
+        android:duration="600"
+        android:valueTo="-24"
+        android:valueType="floatType"
+        android:interpolator="@android:anim/decelerate_interpolator" />
+    <objectAnimator
+        android:propertyName="scaleX"
+        android:duration="300"
+        android:valueTo="1.2"
+        android:valueType="floatType"
+        android:interpolator="@android:anim/decelerate_interpolator" />
+    <objectAnimator
+        android:propertyName="scaleY"
+        android:duration="300"
+        android:valueTo="1.2"
+        android:valueType="floatType"
+        android:interpolator="@android:anim/decelerate_interpolator" />
+</set>

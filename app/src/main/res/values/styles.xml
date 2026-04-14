@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- iOS风格滑块 -->
+    <style name="CustomSlider" parent="Widget.Material3.Slider">
+        <item name="trackHeight">4dp</item>
+        <item name="thumbRadius">8dp</item>
+        <item name="haloRadius">16dp</item>
+        <item name="tickVisible">false</item>
+        <item name="labelBehavior">gone</item>
+    </style>
+
+    <!-- iOS风格进度条滑块 -->
+    <style name="ProgressSlider" parent="Widget.Material3.Slider">
+        <item name="trackHeight">6dp</item>
+        <item name="thumbRadius">7dp</item>
+        <item name="haloRadius">14dp</item>
+        <item name="labelBehavior">gone</item>
+    </style>
+
+    <!-- iOS风格按钮 - 轮廓 -->
+    <style name="IosOutlinedButton" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="android:textColor">@color/ios_blue</item>
+        <item name="strokeColor">@color/ios_blue</item>
+        <item name="cornerRadius">8dp</item>
+        <item name="android:minHeight">36dp</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+
+    <!-- iOS风格主要按钮 - 填充 -->
+    <style name="IosFilledButton" parent="Widget.Material3.Button">
+        <item name="android:textColor">@color/ios_button_text</item>
+        <item name="backgroundTint">@color/ios_button_background</item>
+        <item name="cornerRadius">8dp</item>
+        <item name="android:minHeight">44dp</item>
+        <item name="android:textSize">17sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <!-- iOS风格次要按钮 -->
+    <style name="PrimaryButton" parent="IosFilledButton" />
+
+    <!-- iOS风格比例按钮 -->
+    <style name="AspectRatioButton" parent="IosOutlinedButton">
+        <item name="android:textSize">15sp</item>
+    </style>
+
+    <!-- iOS风格图标按钮 -->
+    <style name="IconButton" parent="Widget.Material3.Button.IconButton.Filled">
+        <item name="backgroundTint">@color/ios_secondary_fill</item>
+        <item name="iconTint">@color/ios_blue</item>
+        <item name="cornerRadius">8dp</item>
+    </style>
+
+    <!-- iOS风格卡片 -->
+    <style name="IosCard" parent="Widget.Material3.CardView.Elevated">
+        <item name="cardBackgroundColor">@color/ios_card_background</item>
+        <item name="cardCornerRadius">12dp</item>
+        <item name="cardElevation">0dp</item>
+        <item name="strokeColor">@color/ios_separator</item>
+        <item name="strokeWidth">1dp</item>
+    </style>
+</resources>

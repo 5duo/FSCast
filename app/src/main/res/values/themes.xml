@@ -1,0 +1,36 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- iOS风格主题 -->
+    <style name="Theme.FloatingScreenCasting" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- iOS蓝色作为主色 -->
+        <item name="colorPrimary">@color/ios_blue</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorPrimaryContainer">@color/ios_secondary_background</item>
+        <item name="colorOnPrimaryContainer">@color/ios_text_primary</item>
+
+        <!-- 次要色调 -->
+        <item name="colorSecondary">@color/ios_text_secondary</item>
+        <item name="colorOnSecondary">@color/white</item>
+        <item name="colorSecondaryContainer">@color/ios_tertiary_background</item>
+        <item name="colorOnSecondaryContainer">@color/ios_text_primary</item>
+
+        <!-- 背景色 -->
+        <item name="android:colorBackground">@color/ios_background</item>
+        <item name="colorSurface">@color/ios_card_background</item>
+        <item name="colorOnBackground">@color/ios_text_primary</item>
+        <item name="colorOnSurface">@color/ios_text_primary</item>
+        <item name="colorSurfaceVariant">@color/ios_tertiary_background</item>
+
+        <!-- 错误色 -->
+        <item name="colorError">@color/ios_red</item>
+        <item name="colorOnError">@color/white</item>
+
+        <!-- 状态栏 - iOS透明 -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">true</item>
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="o_mr1">shortEdges</item>
+
+        <!-- 卡片样式 -->
+        <item name="cardBackgroundColor">@color/ios_card_background</item>
+        <item name="cardElevation">0dp</item>
+    </style>
+</resources>
