@@ -68,7 +68,8 @@
       "Bash(findstr /i \"WiFi 以太网\")",
       "Bash(cat)",
       "Bash(chmod +x /tmp/process_url.sh)",
-      "Bash(bash /tmp/process_url.sh)"
+      "Bash(bash /tmp/process_url.sh)",
+      "Bash(grep -E \"\\\\.md$|\\\\.sh$\")"
     ]
   }
 }
