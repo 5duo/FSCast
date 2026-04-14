@@ -119,6 +119,7 @@ class SsdpServer(private val context: Context) {
             Log.d(TAG, "设备位置: http://$currentIp:49152/dlna/description.xml")
             Log.d(TAG, "设备名称: 智能电视")
             Log.d(TAG, "Device UUID: $deviceUuid")
+            Log.d(TAG, "========== SSDP.start()即将返回true ==========")
             true
         } catch (e: Exception) {
             Log.e(TAG, "✗ 启动SSDP服务失败", e)

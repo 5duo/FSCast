@@ -677,6 +677,35 @@ class VideoPresentation(
     }
 
     /**
+     * 重置到初始状态（等待投屏状态）
+     * 停止播放，显示加载动画，恢复用户设置的透明度
+     */
+    fun resetToInitialState() {
+        android.util.Log.d("VideoPresentation", "========== resetToInitialState开始 ==========")
+
+        // 停止播放
+        exoPlayer?.stop()
+
+        // 清除当前URI，确保下次投屏可以重新加载
+        currentUri = ""
+        currentReferer = ""
+
+        // 显示等待投屏的加载动画
+        binding.waitingContainer?.isVisible = true
+
+        // 隐藏PlayerView
+        binding.playerView?.isVisible = false
+
+        // 恢复用户设置的透明度
+        updateWindowAlpha()
+
+        // 重置音频路由
+        audioRouteManager?.resetAudioRoute()
+
+        android.util.Log.d("VideoPresentation", "========== resetToInitialState完成 ==========")
+    }
+
+    /**
      * 设置窗口透明度（播放状态）
      * @param isPlaying true=播放中（不透明），false=未播放（使用用户设置的透明度）
      */

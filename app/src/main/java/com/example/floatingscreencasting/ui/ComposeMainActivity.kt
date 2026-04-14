@@ -241,7 +241,7 @@ class ComposeMainActivity : AppCompatActivity() {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
-                    .padding(start = 150.dp, end = 20.dp, top = 40.dp, bottom = 16.dp)
+                    .padding(start = 150.dp, end = 20.dp, top = 70.dp, bottom = 16.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -368,9 +368,14 @@ class ComposeMainActivity : AppCompatActivity() {
     }
 
     private fun stop() {
-        _uiState.value = uiState.value.copy(isPlaying = false)
+        _uiState.value = uiState.value.copy(
+            isPlaying = false,
+            currentPosition = 0,
+            duration = 0
+        )
         try {
             videoPresentation?.stop()
+            videoPresentation?.resetToInitialState()
         } catch (e: Exception) {
             Log.e("ComposeMainActivity", "停止播放失败", e)
         }
@@ -737,8 +742,14 @@ class ComposeMainActivity : AppCompatActivity() {
                 Log.d("ComposeMainActivity", "收到停止回调")
                 try {
                     videoPresentation?.stop()
-                    // 停止播放
-                    _uiState.value = uiState.value.copy(isPlaying = false)
+                    // 停止播放，但保持悬浮窗显示，恢复到初始状态
+                    videoPresentation?.resetToInitialState()
+                    _uiState.value = uiState.value.copy(
+                        isPlaying = false,
+                        castingStatus = "等待投屏",
+                        currentPosition = 0,
+                        duration = 0
+                    )
                 } catch (e: Exception) {
                     Log.e("ComposeMainActivity", "停止播放失败", e)
                 }
@@ -797,34 +808,43 @@ class ComposeMainActivity : AppCompatActivity() {
                     Log.e("ComposeMainActivity", "Seek失败: target='$target'", e)
                 }
             }
-
-            onGetDuration = {
-                try {
-                    val duration = videoPresentation?.getExoPlayer()?.duration?.div(1000L) ?: 0L
-                    Log.d("ComposeMainActivity", "获取视频时长: ${duration}s")
-                    duration
-                } catch (e: Exception) {
-                    Log.e("ComposeMainActivity", "获取时长失败", e)
-                    0L
-                }
-            }
-
-            onGetPosition = {
-                try {
-                    val position = videoPresentation?.getExoPlayer()?.currentPosition?.div(1000L) ?: 0L
-                    Log.d("ComposeMainActivity", "获取播放位置: ${position}s")
-                    position
-                } catch (e: Exception) {
-                    Log.e("ComposeMainActivity", "获取位置失败", e)
-                    0L
-                }
-            }
         }
 
         // 启动DLNA服务
         lifecycleScope.launch {
             dlnaService.start()
             Log.d("ComposeMainActivity", "DLNA服务启动完成")
+
+            // 延迟一点设置回调，确保服务完全启动
+            delay(100)
+
+            // 设置播放状态回调
+            Log.d("ComposeMainActivity", "准备设置播放状态回调")
+            dlnaService.setPlaybackCallbacks(
+                onDuration = {
+                    try {
+                        val durationMs = videoPresentation?.getExoPlayer()?.duration ?: -1L
+                        val duration = if (durationMs > 0) durationMs / 1000L else 0L
+                        Log.d("ComposeMainActivity", "获取视频时长: ${duration}s (原始: ${durationMs}ms)")
+                        duration
+                    } catch (e: Exception) {
+                        Log.e("ComposeMainActivity", "获取时长失败", e)
+                        0L
+                    }
+                },
+                onPosition = {
+                    try {
+                        val positionMs = videoPresentation?.getExoPlayer()?.currentPosition ?: 0L
+                        val position = if (positionMs >= 0) positionMs / 1000L else 0L
+                        Log.d("ComposeMainActivity", "获取播放位置: ${position}s (原始: ${positionMs}ms)")
+                        position
+                    } catch (e: Exception) {
+                        Log.e("ComposeMainActivity", "获取位置失败", e)
+                        0L
+                    }
+                }
+            )
+            Log.d("ComposeMainActivity", "播放状态回调设置完成")
         }
     }
 

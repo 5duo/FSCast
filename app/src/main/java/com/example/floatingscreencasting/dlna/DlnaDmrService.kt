@@ -1,6 +1,8 @@
 package com.example.floatingscreencasting.dlna
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import kotlinx.coroutines.*
 
@@ -28,6 +30,9 @@ class DlnaDmrService(private val context: Context) {
     private var isRunning = false
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
+    // 主线程Handler，用于在主线程上访问ExoPlayer
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     // 投屏状态回调
     var onCastingStateChanged: ((isCasting: Boolean, title: String?) -> Unit)? = null
     var onErrorOccurred: ((error: String) -> Unit)? = null
@@ -41,33 +46,47 @@ class DlnaDmrService(private val context: Context) {
             return true
         }
 
-        Log.d(TAG, "正在启动DLNA服务...")
+        Log.d(TAG, "========== 正在启动DLNA服务... ==========")
+
+        // 设置控制命令回调
+        setupHttpCallbacks()
+        Log.d(TAG, "HTTP回调已设置")
 
         // 启动HTTP服务器
         try {
+            Log.d(TAG, "准备调用httpServer.start()...")
             httpServer.start()
-            Log.d(TAG, "HTTP服务器已启动，端口: 7676")
+            Log.d(TAG, "httpServer.start()调用完成")
         } catch (e: Exception) {
             Log.e(TAG, "启动HTTP服务器失败", e)
             onErrorOccurred?.invoke("启动HTTP服务器失败: ${e.message}")
             return false
         }
 
-        // 设置控制命令回调
-        setupHttpCallbacks()
-
-        // 启动SSDP服务器
-        val ssdpStarted = ssdpServer.start()
-        if (!ssdpStarted) {
-            Log.e(TAG, "启动SSDP服务器失败")
-            onErrorOccurred?.invoke("启动SSDP服务器失败")
-            // HTTP服务器已启动，但SSDP失败，仍然继续
+        // 启动SSDP服务器（异步，不等待完成）
+        Log.d(TAG, "准备启动SSDP服务器（异步）...")
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "SSDP服务器异步启动开始...")
+                val result = ssdpServer.start()
+                Log.d(TAG, "SSDP服务器异步启动完成，result=$result")
+                if (!result) {
+                    Log.e(TAG, "启动SSDP服务器失败")
+                    onErrorOccurred?.invoke("启动SSDP服务器失败")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "启动SSDP服务器时发生异常", e)
+                onErrorOccurred?.invoke("启动SSDP服务器异常: ${e.message}")
+            }
         }
+        Log.d(TAG, "SSDP服务器异步启动已提交")
 
+        Log.d(TAG, "即将设置isRunning=true")
         isRunning = true
-        Log.d(TAG, "DLNA服务启动成功")
+        Log.d(TAG, "========== DLNA服务启动成功 ==========")
         onCastingStateChanged?.invoke(false, null)
 
+        Log.d(TAG, "准备返回true")
         return true
     }
 
@@ -100,6 +119,52 @@ class DlnaDmrService(private val context: Context) {
     fun isActive(): Boolean = isRunning
 
     /**
+     * 设置播放状态回调（供MainActivity调用）
+     */
+    fun setPlaybackCallbacks(
+        onDuration: () -> Long,
+        onPosition: () -> Long
+    ) {
+        Log.d(TAG, "========== setPlaybackCallbacks调用 ==========")
+        this.onGetDuration = onDuration
+        this.onGetPosition = onPosition
+        // 更新HTTP服务器的回调 - 使用Handler在主线程上访问ExoPlayer
+        httpServer.setGetDurationCallback {
+            // 使用Handler在主线程上获取duration
+            var durationResult = 0L
+            val lock = java.util.concurrent.CountDownLatch(1)
+            mainHandler.post {
+                try {
+                    durationResult = getDuration()
+                } catch (e: Exception) {
+                    Log.e(TAG, "获取duration失败", e)
+                }
+                lock.countDown()
+            }
+            lock.await(1, java.util.concurrent.TimeUnit.SECONDS) // 等待最多1秒
+            Log.d(TAG, "getDuration回调被调用，返回: ${durationResult}s")
+            durationResult
+        }
+        httpServer.setGetPositionCallback {
+            // 使用Handler在主线程上获取position
+            var positionResult = 0L
+            val lock = java.util.concurrent.CountDownLatch(1)
+            mainHandler.post {
+                try {
+                    positionResult = getPosition()
+                } catch (e: Exception) {
+                    Log.e(TAG, "获取position失败", e)
+                }
+                lock.countDown()
+            }
+            lock.await(1, java.util.concurrent.TimeUnit.SECONDS) // 等待最多1秒
+            Log.d(TAG, "getPosition回调被调用，返回: ${positionResult}s")
+            positionResult
+        }
+        Log.d(TAG, "========== setPlaybackCallbacks完成 ==========")
+    }
+
+    /**
      * 更新传输状态（供VideoPresentation调用）
      */
     fun updateTransportState(state: String) {
@@ -110,41 +175,43 @@ class DlnaDmrService(private val context: Context) {
      * 设置HTTP服务器回调
      */
     private fun setupHttpCallbacks() {
-        httpServer.apply {
-            setPlayCommand { uri ->
-                serviceScope.launch {
-                    handlePlayCommand(uri)
-                }
-            }
-
-            setStopCommand {
-                serviceScope.launch {
-                    handleStopCommand()
-                }
-            }
-
-            setPauseCommand {
-                serviceScope.launch {
-                    handlePauseCommand()
-                }
-            }
-
-            setSeekCommand { target ->
-                serviceScope.launch {
-                    handleSeekCommand(target)
-                }
-            }
-
-            onGetDuration = {
-                // 从外部获取视频时长
-                onGetDuration?.invoke() ?: 0L
-            }
-
-            onGetPosition = {
-                // 从外部获取当前播放位置
-                onGetPosition?.invoke() ?: 0L
+        httpServer.setPlayCommand { uri ->
+            serviceScope.launch {
+                handlePlayCommand(uri)
             }
         }
+
+        httpServer.setStopCommand {
+            serviceScope.launch {
+                handleStopCommand()
+            }
+        }
+
+        httpServer.setPauseCommand {
+            serviceScope.launch {
+                handlePauseCommand()
+            }
+        }
+
+        httpServer.setSeekCommand { target ->
+            serviceScope.launch {
+                handleSeekCommand(target)
+            }
+        }
+    }
+
+    /**
+     * 获取视频时长（供HTTP服务器调用）
+     */
+    private fun getDuration(): Long {
+        return onGetDuration?.invoke() ?: 0L
+    }
+
+    /**
+     * 获取播放位置（供HTTP服务器调用）
+     */
+    private fun getPosition(): Long {
+        return onGetPosition?.invoke() ?: 0L
     }
 
     /**
@@ -220,7 +287,7 @@ class DlnaDmrService(private val context: Context) {
     var onPlayMedia: ((String) -> Unit)? = null
     var onStopMedia: (() -> Unit)? = null
     var onPauseMedia: (() -> Unit)? = null
-    var onPlay: (() -> Unit)? = null  // 恢复播放回调
+    var onPlay: (() -> Unit)? = null
     var onSeekMedia: ((String) -> Unit)? = null
     var onGetDuration: (() -> Long)? = null
     var onGetPosition: (() -> Long)? = null

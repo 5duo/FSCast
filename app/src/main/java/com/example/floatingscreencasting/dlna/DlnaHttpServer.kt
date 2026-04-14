@@ -41,10 +41,12 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
 
     override fun start() {
         try {
-            Log.d(TAG, "正在启动HTTP服务器...")
+            Log.d(TAG, "========== 正在启动HTTP服务器... ==========")
+            Log.d(TAG, "调用super.start()之前...")
             super.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+            Log.d(TAG, "super.start()调用完成")
             Log.d(TAG, "HTTP服务器已启动，监听所有接口")
-            Log.d(TAG, "服务器端口: 7676")
+            Log.d(TAG, "服务器端口: ${this.listeningPort}")
         } catch (e: Exception) {
             Log.e(TAG, "启动HTTP服务器失败", e)
             throw e
@@ -289,13 +291,18 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
             }
 
             soapAction?.contains("#Stop") == true -> {
-                Log.d(TAG, "收到Stop命令")
+                Log.d(TAG, "========== 收到Stop命令 ==========")
+                Log.d(TAG, "SOAPAction: $soapAction")
+                Log.d(TAG, "请求体: $body")
                 transportState = "STOPPED"
 
                 CoroutineScope(Dispatchers.Main).launch {
+                    Log.d(TAG, "执行Stop命令回调")
                     onStopCommand?.invoke()
+                    Log.d(TAG, "Stop命令回调执行完成")
                 }
 
+                Log.d(TAG, "========== Stop命令处理完成 ==========")
                 """
                 <?xml version="1.0"?>
                 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
@@ -370,33 +377,44 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                 // 获取总时长（秒）
                 val durationSeconds = onGetDuration?.invoke() ?: 0L
 
-                Log.d(TAG, "GetPositionInfo响应: position=${positionSeconds}s (${positionMs}ms), duration=${durationSeconds}s")
+                Log.d(TAG, "GetPositionInfo响应: position=${positionSeconds}s, duration=${durationSeconds}s")
                 Log.d(TAG, "进度百分比: ${if (durationSeconds > 0) (positionSeconds * 100 / durationSeconds) else 0}%")
 
                 // 格式化时间为HH:MM:SS格式
-                val relTime = formatTime(positionSeconds)
-                val absTime = formatTime(positionSeconds)
-                val trackDuration = formatTime(durationSeconds)
+                // 对于无效时长，使用"00:00:00"
+                val relTime = if (positionSeconds >= 0) formatTime(positionSeconds) else "00:00:00"
+                val absTime = relTime
+                val trackDuration = if (durationSeconds > 0) formatTime(durationSeconds) else "00:00:00"
 
-                """
+                // 如果没有内容，返回特殊标记
+                val trackMetaData = if (durationSeconds <= 0) "NOT_IMPLEMENTED" else "NOT_IMPLEMENTED"
+
+                val responseXml = """
                 <?xml version="1.0"?>
                 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
-                           s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"
-                           xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"
-                           xmlns:d="http://schemas.xmlsoap.org/soap/encoding/">
+                           s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
                     <s:Body>
-                        <u:GetPositionInfoResponse>
-                            <TrackDuration>${trackDuration}</TrackDuration>
-                            <TrackMetaData:not_IMPLEMENTED</TrackMetaData>
+                        <u:GetPositionInfoResponse xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+                            <TrackDuration>$trackDuration</TrackDuration>
+                            <TrackMetaData>$trackMetaData</TrackMetaData>
                             <TrackURI></TrackURI>
-                            <RelTime>${relTime}</RelTime>
-                            <AbsTime>${absTime}</AbsTime>
+                            <RelTime>$relTime</RelTime>
+                            <AbsTime>$absTime</AbsTime>
                             <RelCount>2147483647</RelCount>
                             <AbsCount>2147483647</AbsCount>
                         </u:GetPositionInfoResponse>
                     </s:Body>
                 </s:Envelope>
                 """.trimIndent()
+
+                Log.d(TAG, "========== GetPositionInfo XML响应 ==========")
+                Log.d(TAG, "TrackDuration: $trackDuration")
+                Log.d(TAG, "RelTime: $relTime")
+                Log.d(TAG, "AbsTime: $absTime")
+                Log.d(TAG, "完整响应:\n$responseXml")
+                Log.d(TAG, "=========================================")
+
+                responseXml
             }
 
             else -> {
