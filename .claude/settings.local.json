@@ -71,7 +71,14 @@
       "Bash(bash /tmp/process_url.sh)",
       "Bash(grep -E \"\\\\.md$|\\\\.sh$\")",
       "Bash(sed -i '927,936d' app/src/main/java/com/example/floatingscreencasting/ui/ComposeMainActivity.kt)",
-      "Bash(sed -i '923s/.*/    val availableDisplays: List<com.example.floatingscreencasting.ui.composable.DisplayInfo> = emptyList\\(\\)/' app/src/main/java/com/example/floatingscreencasting/ui/ComposeMainActivity.kt)"
+      "Bash(sed -i '923s/.*/    val availableDisplays: List<com.example.floatingscreencasting.ui.composable.DisplayInfo> = emptyList\\(\\)/' app/src/main/java/com/example/floatingscreencasting/ui/ComposeMainActivity.kt)",
+      "Bash(./gradlew :app:installDebug --no-build-cache)",
+      "Bash(./gradlew :app:compileDebugKotlin --rerun-tasks :app:installDebug)",
+      "Bash(./gradlew :app:installDebug)",
+      "Bash(./gradlew :app:installDebug --rerun-tasks)",
+      "Bash(git add:*)",
+      "Bash(git rm:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
