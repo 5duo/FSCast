@@ -303,6 +303,9 @@ FSCast/
 - [Jetpack Compose](https://developer.android.com/jetpack/compose) - 现代化UI框架
 - [OkHttp](https://github.com/square/okhttp) - 高效HTTP客户端
 
+特别感谢：
+- **涛神**（新版悬浮球作者）- 感谢您的指导和带领，带我们飞！🚀
+
 ---
 
 ## 📞 联系方式
