@@ -134,6 +134,16 @@ class DlnaDmrService(private val context: Context) {
                     handleSeekCommand(target)
                 }
             }
+
+            onGetDuration = {
+                // 从外部获取视频时长
+                onGetDuration?.invoke() ?: 0L
+            }
+
+            onGetPosition = {
+                // 从外部获取当前播放位置
+                onGetPosition?.invoke() ?: 0L
+            }
         }
     }
 
@@ -153,8 +163,13 @@ class DlnaDmrService(private val context: Context) {
         val title = extractTitleFromUri(uri)
 
         try {
+            // 检查onPlayMedia回调是否设置
+            Log.d(TAG, "onPlayMedia回调是否为null: ${onPlayMedia == null}")
+
             // 通过EventBus或回调通知Presentation播放视频
             onPlayMedia?.invoke(uri)
+            Log.d(TAG, "onPlayMedia回调已调用")
+
             onCastingStateChanged?.invoke(true, title)
         } catch (e: Exception) {
             Log.e(TAG, "播放失败", e)
@@ -205,4 +220,6 @@ class DlnaDmrService(private val context: Context) {
     var onStopMedia: (() -> Unit)? = null
     var onPauseMedia: (() -> Unit)? = null
     var onSeekMedia: ((String) -> Unit)? = null
+    var onGetDuration: (() -> Long)? = null
+    var onGetPosition: (() -> Long)? = null
 }

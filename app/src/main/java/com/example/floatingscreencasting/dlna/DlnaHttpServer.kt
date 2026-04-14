@@ -56,6 +56,10 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
     private var onPauseCommand: (() -> Unit)? = null
     private var onSeekCommand: ((String) -> Unit)? = null
 
+    // 获取播放状态的回调
+    private var onGetDuration: (() -> Long)? = null
+    private var onGetPosition: (() -> Long)? = null
+
     /**
      * 设置播放命令回调
      */
@@ -82,6 +86,20 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
      */
     fun setSeekCommand(callback: (String) -> Unit) {
         onSeekCommand = callback
+    }
+
+    /**
+     * 设置获取时长回调
+     */
+    fun setGetDurationCallback(callback: () -> Long) {
+        onGetDuration = callback
+    }
+
+    /**
+     * 设置获取位置回调
+     */
+    fun setGetPositionCallback(callback: () -> Long) {
+        onGetPosition = callback
     }
 
     override fun serve(session: IHTTPSession): Response {
@@ -311,9 +329,24 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                 val unit = extractValue(body, "Unit")
                 val target = extractValue(body, "Target")
                 Log.d(TAG, "收到Seek命令: unit=$unit, target=$target")
+                Log.d(TAG, "Seek请求体: $body")
+
+                // 验证target格式
+                if (target.contains(":")) {
+                    // HH:MM:SS格式
+                    Log.d(TAG, "Seek目标格式: HH:MM:SS")
+                } else {
+                    // 相对时间格式
+                    Log.d(TAG, "Seek目标格式: 相对时间或绝对时间")
+                }
 
                 CoroutineScope(Dispatchers.Main).launch {
-                    onSeekCommand?.invoke(target)
+                    try {
+                        onSeekCommand?.invoke(target)
+                        Log.d(TAG, "Seek命令处理完成")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Seek命令处理失败", e)
+                    }
                 }
 
                 """
@@ -322,6 +355,45 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                            s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
                     <s:Body>
                         <u:SeekResponse xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"/>
+                    </s:Body>
+                </s:Envelope>
+                """.trimIndent()
+            }
+
+            soapAction?.contains("#GetPositionInfo") == true -> {
+                Log.d(TAG, "收到GetPositionInfo命令")
+
+                // 获取当前播放位置（秒）
+                val positionSeconds = onGetPosition?.invoke() ?: 0L
+                val positionMs = positionSeconds * 1000
+
+                // 获取总时长（秒）
+                val durationSeconds = onGetDuration?.invoke() ?: 0L
+
+                Log.d(TAG, "GetPositionInfo响应: position=${positionSeconds}s (${positionMs}ms), duration=${durationSeconds}s")
+                Log.d(TAG, "进度百分比: ${if (durationSeconds > 0) (positionSeconds * 100 / durationSeconds) else 0}%")
+
+                // 格式化时间为HH:MM:SS格式
+                val relTime = formatTime(positionSeconds)
+                val absTime = formatTime(positionSeconds)
+                val trackDuration = formatTime(durationSeconds)
+
+                """
+                <?xml version="1.0"?>
+                <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+                           s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"
+                           xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"
+                           xmlns:d="http://schemas.xmlsoap.org/soap/encoding/">
+                    <s:Body>
+                        <u:GetPositionInfoResponse>
+                            <TrackDuration>${trackDuration}</TrackDuration>
+                            <TrackMetaData:not_IMPLEMENTED</TrackMetaData>
+                            <TrackURI></TrackURI>
+                            <RelTime>${relTime}</RelTime>
+                            <AbsTime>${absTime}</AbsTime>
+                            <RelCount>2147483647</RelCount>
+                            <AbsCount>2147483647</AbsCount>
+                        </u:GetPositionInfoResponse>
                     </s:Body>
                 </s:Envelope>
                 """.trimIndent()
@@ -339,6 +411,18 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                 """.trimIndent()
             }
         }
+    }
+
+    /**
+     * 格式化时间为HH:MM:SS格式
+     * @param seconds 总秒数
+     * @return 格式化的时间字符串
+     */
+    private fun formatTime(seconds: Long): String {
+        val hours = seconds / 3600
+        val minutes = (seconds % 3600) / 60
+        val secs = seconds % 60
+        return String.format("%02d:%02d:%02d", hours, minutes, secs)
     }
 
     /**

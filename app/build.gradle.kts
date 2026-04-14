@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose) // Kotlin 2.0+需要的Compose Compiler插件
 }
 
 android {
@@ -34,10 +35,14 @@ android {
     }
     kotlinOptions {
         jvmTarget = "11"
+        freeCompilerArgs += listOf(
+            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api"
+        )
     }
 
     buildFeatures {
-        viewBinding = true
+        compose = true
+        viewBinding = true  // 保留以支持渐进式迁移
     }
 }
 
@@ -45,6 +50,18 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
+
+    // Compose BOM
+    implementation(platform(libs.compose.bom))
+    implementation(libs.compose.ui)
+    implementation(libs.compose.ui.graphics)
+    implementation(libs.compose.ui.tooling.preview)
+    implementation(libs.compose.material3)
+    implementation(libs.activity.compose)
+    implementation(libs.compose.animation)
+
+    // Compose Debug
+    debugImplementation(libs.compose.ui.tooling)
 
     // Media3 ExoPlayer (视频播放)
     implementation(libs.media3.exoplayer)

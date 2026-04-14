@@ -32,9 +32,9 @@
         android:theme="@style/Theme.FloatingScreenCasting"
         android:networkSecurityConfig="@xml/network_security_config">
 
-        <!-- 主界面 -->
+        <!-- 主界面 - Compose版本 -->
         <activity
-            android:name=".ui.MainActivity"
+            android:name=".ui.ComposeMainActivity"
             android:exported="true"
             android:launchMode="singleTask"
             android:screenOrientation="sensorLandscape">

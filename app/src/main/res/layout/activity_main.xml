@@ -243,6 +243,20 @@
                             app:iconSize="22dp"
                             app:iconTint="@color/ios_blue" />
 
+                        <!-- 静音按钮 -->
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/muteButton"
+                            style="@style/IconButton"
+                            android:layout_width="50dp"
+                            android:layout_height="50dp"
+                            android:layout_marginStart="10dp"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            android:contentDescription="静音"
+                            app:icon="@android:drawable/ic_lock_silent_mode"
+                            app:iconSize="22dp"
+                            app:iconTint="@color/ios_blue" />
+
                     </LinearLayout>
 
                 </LinearLayout>

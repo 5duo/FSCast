@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Display
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.WindowManager
 import androidx.core.view.isVisible
 import androidx.media3.common.MediaItem
@@ -37,6 +38,15 @@ class VideoPresentation(
 
     // 音频路由管理器
     private var audioRouteManager: com.example.floatingscreencasting.audio.AudioRouteManager? = null
+
+    // 高级音频路由管理器（反射方案）
+    private var advancedAudioRouteManager: com.example.floatingscreencasting.audio.AdvancedAudioRouteManager? = null
+
+    // 静音状态
+    private var isMuted = true
+
+    // 当前播放的URL
+    private var currentUri: String = ""
 
     // 当前播放URL的Referer
     private var currentReferer: String = ""
@@ -132,10 +142,11 @@ class VideoPresentation(
                 gravity = Gravity.TOP or Gravity.START
             }
             // 驾驶屏不可触摸，允许事件穿透
-            // 但保留音频功能
+            // 但需要接收按键事件以支持媒体按键控制
+            // 因此只设置FLAG_NOT_TOUCHABLE，不设置FLAG_NOT_FOCUSABLE
             setFlags(
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             )
             // 确保窗口可以播放音频
             addFlags(WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED)
@@ -350,6 +361,24 @@ class VideoPresentation(
     fun playMedia(uri: String) {
         android.util.Log.d("VideoPresentation", "========== playMedia开始 ==========")
         android.util.Log.d("VideoPresentation", "playMedia被调用，uri长度: ${uri.length}")
+        android.util.Log.d("VideoPresentation", "当前URI: ${currentUri.take(50)}...")
+        android.util.Log.d("VideoPresentation", "新URI: ${uri.take(50)}...")
+        android.util.Log.d("VideoPresentation", "isPlaying: ${isPlaying()}")
+
+        // 检查是否是相同的URL（恢复播放）
+        if (currentUri == uri && exoPlayer != null) {
+            android.util.Log.d("VideoPresentation", "相同URL，尝试恢复播放")
+            // 简单切换播放状态
+            if (isPlaying()) {
+                android.util.Log.d("VideoPresentation", "正在播放，切换为暂停")
+                pause()
+            } else {
+                android.util.Log.d("VideoPresentation", "未播放，切换为播放")
+                play()
+            }
+            return
+        }
+
         android.util.Log.d("VideoPresentation", "实际displayId: ${display.displayId}")
         android.util.Log.d("VideoPresentation", "isShowing: $isShowing")
         android.util.Log.d("VideoPresentation", "window: $window")
@@ -379,12 +408,34 @@ class VideoPresentation(
      * 实际执行播放
      */
     private fun doPlayMedia(uri: String) {
+        // 保存当前播放的URL
+        currentUri = uri
         android.util.Log.d("VideoPresentation", "doPlayMedia: 开始实际播放")
         android.util.Log.d("VideoPresentation", "完整URL: $uri")
+
+        // 尝试取消A2DP静音（需要root权限）
+        audioRouteManager?.setA2DPMuted(false)
+        android.util.Log.d("VideoPresentation", "A2DP静音设置已尝试取消")
 
         // 设置音频路由到蓝牙设备（如果已连接）
         audioRouteManager?.setAudioRouteToBluetooth()
         android.util.Log.d("VideoPresentation", "音频路由已配置")
+
+        // 尝试高级音频路由（反射方案）
+        advancedAudioRouteManager = com.example.floatingscreencasting.audio.AdvancedAudioRouteManager(outerContext)
+        android.util.Log.d("VideoPresentation", "========== 尝试高级音频路由 ==========")
+        android.util.Log.d("VideoPresentation", advancedAudioRouteManager?.getAllAudioDeviceInfo() ?: "无法获取设备信息")
+
+        // 尝试多种路由方法
+        val reflectionSuccess = advancedAudioRouteManager?.trySetBluetoothA2dpDevice() ?: false
+        android.util.Log.d("VideoPresentation", "反射路由结果: $reflectionSuccess")
+
+        if (!reflectionSuccess) {
+            val focusSuccess = advancedAudioRouteManager?.requestAudioFocusAndSetRoute() ?: false
+            android.util.Log.d("VideoPresentation", "音频焦点路由结果: $focusSuccess")
+        }
+
+        android.util.Log.d("VideoPresentation", "========== 高级音频路由尝试完成 ==========")
 
         // 处理特殊平台的URL签名
         val finalUri = when {
@@ -436,13 +487,15 @@ class VideoPresentation(
 
         android.util.Log.d("VideoPresentation", "创建新的ExoPlayer实例")
 
-        // 创建正确的AudioAttributes - 按照爱奇艺视频应用配置
+        // 静音播放设置：由于车机系统限制，投屏视频无法输出到蓝牙耳机
+        // 因此设置为静音播放，避免干扰其他应用的声音输出
         val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
             .setUsage(androidx.media3.common.C.USAGE_MEDIA)
             .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE)
             .build()
 
         android.util.Log.d("VideoPresentation", "ExoPlayer AudioAttributes: USAGE_MEDIA, CONTENT_TYPE_MOVIE, handleAudioFocus=true")
+        android.util.Log.d("VideoPresentation", "注意：投屏视频将静音播放（车机系统限制）")
         android.util.Log.d("VideoPresentation", "使用outerContext创建ExoPlayer: $outerContext")
 
         // 重要：使用outerContext（MainActivity的Context）而不是Presentation的context
@@ -452,6 +505,10 @@ class VideoPresentation(
             .setAudioAttributes(audioAttributes, true)  // true = handleAudioFocus
             .build()
             .apply {
+                // 根据静音状态设置音量
+                volume = if (isMuted) 0f else 1f
+                android.util.Log.d("VideoPresentation", "ExoPlayer音量: ${if (isMuted) 0 else 1}, 静音状态: $isMuted")
+
                 binding.playerView.player = this
                 android.util.Log.d("VideoPresentation", "ExoPlayer已绑定到PlayerView")
 
@@ -549,14 +606,27 @@ class VideoPresentation(
      * 播放
      */
     fun play() {
+        android.util.Log.d("VideoPresentation", "play() 调用 - isPlaying: ${isPlaying()}")
         exoPlayer?.play()
+        android.util.Log.d("VideoPresentation", "play() 完成 - isPlaying: ${isPlaying()}")
     }
 
     /**
      * 暂停
      */
     fun pause() {
+        android.util.Log.d("VideoPresentation", "pause() 调用 - isPlaying: ${isPlaying()}")
         exoPlayer?.pause()
+        android.util.Log.d("VideoPresentation", "pause() 完成 - isPlaying: ${isPlaying()}")
+    }
+
+    /**
+     * 设置静音状态
+     */
+    fun setMuted(muted: Boolean) {
+        isMuted = muted
+        exoPlayer?.volume = if (muted) 0f else 1f
+        android.util.Log.d("VideoPresentation", "静音状态: $muted, 音量: ${if (muted) 0 else 1}")
     }
 
     /**
@@ -575,6 +645,8 @@ class VideoPresentation(
         setWindowAlphaForPlaying(false)
         // 重置音频路由
         audioRouteManager?.resetAudioRoute()
+        // 恢复A2DP静音状态（可选，根据需要决定是否恢复）
+        // audioRouteManager?.setA2DPMuted(true)
     }
 
     /**
@@ -636,5 +708,47 @@ class VideoPresentation(
     private fun releasePlayer() {
         exoPlayer?.release()
         exoPlayer = null
+    }
+
+    /**
+     * 处理媒体按键事件（方向盘多功能按键）
+     */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        android.util.Log.d("VideoPresentation", "onKeyDown: keyCode=$keyCode")
+        return when (keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+            KeyEvent.KEYCODE_HEADSETHOOK -> {
+                // 播放/暂停切换
+                if (isPlaying()) {
+                    pause()
+                    android.util.Log.d("VideoPresentation", "媒体按键：暂停")
+                } else {
+                    play()
+                    android.util.Log.d("VideoPresentation", "媒体按键：播放")
+                }
+                true
+            }
+            KeyEvent.KEYCODE_MEDIA_PLAY -> {
+                play()
+                android.util.Log.d("VideoPresentation", "媒体按键：播放")
+                true
+            }
+            KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                pause()
+                android.util.Log.d("VideoPresentation", "媒体按键：暂停")
+                true
+            }
+            KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                next()
+                android.util.Log.d("VideoPresentation", "媒体按键：下一个")
+                true
+            }
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
+                previous()
+                android.util.Log.d("VideoPresentation", "媒体按键：上一个")
+                true
+            }
+            else -> super.onKeyDown(keyCode, event)
+        }
     }
 }

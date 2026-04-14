@@ -11,8 +11,13 @@ import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.annotation.RequiresApi
+import java.io.BufferedReader
+import java.io.DataOutputStream
+import java.io.InputStreamReader
 
 /**
  * 音频路由管理类
@@ -75,6 +80,92 @@ class AudioRouteManager(private val context: Context) {
             Log.d("AudioRouteManager", "蓝牙状态监听已注册")
         } catch (e: Exception) {
             Log.e("AudioRouteManager", "注册蓝牙监听失败", e)
+        }
+    }
+
+    /**
+     * 设置A2DP静音状态（需要root权限）
+     * @param unmuted true=取消静音, false=静音
+     */
+    fun setA2DPMuted(unmuted: Boolean) {
+        try {
+            val value = if (unmuted) "0" else "1"
+            val result = executeShellCommand("setprop brlinkd.a2dp.muted $value")
+            val persistResult = executeShellCommand("setprop persist.brlinkd.a2dp.muted $value")
+
+            Log.d("AudioRouteManager", "设置A2DP静音: unmuted=$unmuted, result=$result, persistResult=$persistResult")
+
+            // 验证设置是否成功
+            Handler(Looper.getMainLooper()).postDelayed({
+                verifyA2DPMutedState(unmuted)
+            }, 500)
+        } catch (e: Exception) {
+            Log.e("AudioRouteManager", "设置A2DP静音失败", e)
+        }
+    }
+
+    /**
+     * 验证A2DP静音状态
+     */
+    private fun verifyA2DPMutedState(expectedUnmuted: Boolean) {
+        try {
+            val currentValue = executeShellCommand("getprop brlinkd.a2dp.muted")
+            val isUnmuted = currentValue.trim() == "0"
+
+            Log.d("AudioRouteManager", "验证A2DP静音状态: expected=$expectedUnmuted, actual=$isUnmuted, value=$currentValue")
+
+            if (isUnmuted != expectedUnmuted) {
+                Log.w("AudioRouteManager", "A2DP静音状态设置失败，重试...")
+                // 重试一次
+                setA2DPMuted(expectedUnmuted)
+            } else {
+                Log.i("AudioRouteManager", "A2DP静音状态设置成功: ${if (expectedUnmuted) "已取消静音" else "已静音"}")
+            }
+        } catch (e: Exception) {
+            Log.e("AudioRouteManager", "验证A2DP静音状态失败", e)
+        }
+    }
+
+    /**
+     * 执行shell命令（需要root权限）
+     */
+    private fun executeShellCommand(command: String): String {
+        var process: Process? = null
+        var os: DataOutputStream? = null
+        var reader: BufferedReader? = null
+
+        return try {
+            process = Runtime.getRuntime().exec("su")
+            os = DataOutputStream(process.outputStream)
+
+            // 执行命令
+            os.write(command.toByteArray())
+            os.writeBytes("\n")
+            os.flush()
+
+            // 退出su
+            os.writeBytes("exit\n")
+            os.flush()
+
+            // 读取输出
+            reader = BufferedReader(InputStreamReader(process.inputStream))
+            val output = reader.use { it.readText() }
+
+            // 等待命令执行完成
+            process.waitFor()
+
+            output.trim()
+        } catch (e: Exception) {
+            Log.e("AudioRouteManager", "执行shell命令失败: $command", e)
+            ""
+        } finally {
+            try {
+                os?.close()
+                reader?.close()
+                process?.destroy()
+            } catch (e: Exception) {
+                Log.e("AudioRouteManager", "关闭资源失败", e)
+            }
         }
     }
 

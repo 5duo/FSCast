@@ -24,8 +24,12 @@ import com.example.floatingscreencasting.R
 import com.example.floatingscreencasting.audio.AudioOutputHelper
 import com.example.floatingscreencasting.databinding.ActivityMainBinding
 import com.example.floatingscreencasting.dlna.DlnaDmrService
+import com.example.floatingscreencasting.events.MuteEvent
 import com.example.floatingscreencasting.presentation.VideoPresentation
 import kotlinx.coroutines.launch
+import org.greenrobot.eventbus.EventBus
+import org.greenrobot.eventbus.Subscribe
+import org.greenrobot.eventbus.ThreadMode
 
 /**
  * 中控屏主界面
@@ -52,6 +56,9 @@ class MainActivity : AppCompatActivity() {
 
     // 当前选中的比例
     private var currentAspectRatio = "16:9"
+
+    // 静音状态
+    private var isMuted = true  // 默认静音
 
     // 进度更新定时器
     private val progressHandler = Handler(Looper.getMainLooper())
@@ -159,6 +166,12 @@ class MainActivity : AppCompatActivity() {
 
         // 注册播放错误广播接收器
         registerReceiver(playbackErrorReceiver, IntentFilter("com.example.floatingscreencasting.PLAYBACK_ERROR"))
+
+        // 注册EventBus
+        EventBus.getDefault().register(this)
+
+        // 初始化静音按钮状态
+        updateMuteButton()
 
         // 初始化并启动DLNA服务
         initializeDlnaService()
@@ -450,6 +463,18 @@ class MainActivity : AppCompatActivity() {
             videoPresentation?.stop()
         }
 
+        // 静音按钮
+        binding.muteButton.setOnClickListener {
+            isMuted = !isMuted
+            updateMuteButton()
+
+            // 通过EventBus发送静音状态
+            EventBus.getDefault().post(MuteEvent(isMuted))
+
+            // 应用静音状态到VideoPresentation
+            videoPresentation?.setMuted(isMuted)
+        }
+
         // 进度条控制
         binding.progressSlider.addOnSliderTouchListener(object : com.google.android.material.slider.Slider.OnSliderTouchListener {
             override fun onStartTrackingTouch(slider: com.google.android.material.slider.Slider) {
@@ -658,6 +683,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * 更新静音按钮状态
+     */
+    private fun updateMuteButton() {
+        if (isMuted) {
+            // 静音状态
+            binding.muteButton.setIconResource(android.R.drawable.ic_lock_silent_mode)
+            binding.muteButton.contentDescription = "取消静音"
+        } else {
+            // 非静音状态
+            binding.muteButton.setIconResource(android.R.drawable.ic_lock_silent_mode_off)
+            binding.muteButton.contentDescription = "静音"
+        }
+    }
+
+    /**
      * Activity恢复到前台
      */
     override fun onResume() {
@@ -728,6 +768,16 @@ class MainActivity : AppCompatActivity() {
                     Log.e("MainActivity", "Seek失败", e)
                 }
             }
+
+            onGetDuration = {
+                // 获取视频总时长（毫秒转换为秒）
+                videoPresentation?.getExoPlayer()?.duration?.div(1000L) ?: 0L
+            }
+
+            onGetPosition = {
+                // 获取当前播放位置（毫秒转换为秒）
+                videoPresentation?.getExoPlayer()?.currentPosition?.div(1000L) ?: 0L
+            }
         }
 
         lifecycleScope.launch {
@@ -767,6 +817,13 @@ class MainActivity : AppCompatActivity() {
             Log.e("MainActivity", "取消注册广播接收器失败", e)
         }
 
+        // 注销EventBus
+        try {
+            EventBus.getDefault().unregister(this)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "取消注册EventBus失败", e)
+        }
+
         lifecycleScope.launch {
             dlnaService.stop()
         }
@@ -775,5 +832,14 @@ class MainActivity : AppCompatActivity() {
         videoPresentation?.dismiss()
         _binding = null
         super.onDestroy()
+    }
+
+    /**
+     * EventBus订阅方法 - 接收静音状态变化
+     */
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    fun onMuteEvent(event: MuteEvent) {
+        isMuted = event.isMuted
+        updateMuteButton()
     }
 }
