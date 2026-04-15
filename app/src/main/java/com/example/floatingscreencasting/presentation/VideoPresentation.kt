@@ -41,6 +41,9 @@ class VideoPresentation(
     // 音频路由管理器
     private var audioRouteManager: com.example.floatingscreencasting.audio.AudioRouteManager? = null
 
+    // 音频流管理器（由 ComposeMainActivity 注入）
+    var audioStreamManager: com.example.floatingscreencasting.audio.AudioStreamManager? = null
+
     // 播放历史管理器
     private val historyManager: PlaybackHistoryManager = PlaybackHistoryManager.getInstance(outerContext)
 
@@ -273,10 +276,18 @@ class VideoPresentation(
 
         // 重要：使用outerContext（MainActivity的Context）而不是Presentation的context
         // 这样ExoPlayer可以正确继承Activity的音频配置和路由
-        exoPlayer = ExoPlayer.Builder(outerContext)
+        val playerBuilder = ExoPlayer.Builder(outerContext)
             .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(audioAttributes, true)  // true = handleAudioFocus
-            .build()
+
+        // 注入自定义 AudioSink 以拦截 PCM 音频数据
+        val streamManager = audioStreamManager
+        if (streamManager != null) {
+            playerBuilder.setRenderersFactory(streamManager.createRenderersFactory())
+            android.util.Log.d("VideoPresentation", "已注入StreamingAudioSink用于音频流传输")
+        }
+
+        exoPlayer = playerBuilder.build()
             .apply {
                 android.util.Log.d("VideoPresentation", "将ExoPlayer绑定到PlayerView")
                 binding.playerView.player = this
@@ -506,10 +517,18 @@ class VideoPresentation(
 
         // 重要：使用outerContext（MainActivity的Context）而不是Presentation的context
         // 这样ExoPlayer可以正确继承Activity的音频配置和路由
-        exoPlayer = ExoPlayer.Builder(outerContext)
+        val playerBuilder = ExoPlayer.Builder(outerContext)
             .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(audioAttributes, true)  // true = handleAudioFocus
-            .build()
+
+        // 注入自定义 AudioSink 以拦截 PCM 音频数据
+        val streamManager = audioStreamManager
+        if (streamManager != null) {
+            playerBuilder.setRenderersFactory(streamManager.createRenderersFactory())
+            android.util.Log.d("VideoPresentation", "已注入StreamingAudioSink用于音频流传输")
+        }
+
+        exoPlayer = playerBuilder.build()
             .apply {
                 // 根据静音状态设置音量
                 volume = if (isMuted) 0f else 1f
@@ -756,6 +775,25 @@ class VideoPresentation(
      */
     fun seekTo(positionMs: Long) {
         exoPlayer?.seekTo(positionMs)
+    }
+
+    /**
+     * 处理来自手机端的远程控制命令
+     */
+    fun handleRemoteCommand(action: String, params: Map<String, Any>) {
+        android.util.Log.d("VideoPresentation", "远程命令: $action $params")
+        when (action) {
+            "play" -> play()
+            "pause" -> pause()
+            "stop" -> {
+                stop()
+                resetToInitialState()
+            }
+            "seek" -> {
+                val positionMs = (params["position_ms"] as? Number)?.toLong() ?: 0
+                seekTo(positionMs)
+            }
+        }
     }
 
     /**

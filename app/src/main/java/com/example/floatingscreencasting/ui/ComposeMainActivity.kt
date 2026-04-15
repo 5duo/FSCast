@@ -63,6 +63,9 @@ class ComposeMainActivity : AppCompatActivity() {
     // DLNA服务
     private lateinit var dlnaService: DlnaDmrService
 
+    // 音频流管理器
+    private var audioStreamManager: com.example.floatingscreencasting.audio.AudioStreamManager? = null
+
     // 驾驶屏固定Display ID 2
     private val drivingDisplayId = 2
 
@@ -170,6 +173,7 @@ class ComposeMainActivity : AppCompatActivity() {
         initializeDisplays()
         loadSettings()
         initializeDlnaService()
+        initializeAudioStreamManager()
         updateContinueWatchingStatus()
 
         // 注册广播接收器
@@ -205,7 +209,9 @@ class ComposeMainActivity : AppCompatActivity() {
                     onDefaultClick = { restoreDefault() },
                     onCustomClick = { saveCustomConfig() },
                     onDisplayChange = { displayId -> changeDisplay(displayId) },
-                    onContinueWatching = { continueWatching() }
+                    onContinueWatching = { continueWatching() },
+                    onSelectSpeaker = { audioStreamManager?.setOutputMode(com.example.floatingscreencasting.audio.AudioStreamManager.AudioOutputMode.SPEAKER) },
+                    onSelectDevice = { clientId -> audioStreamManager?.selectClient(clientId) }
                 )
             }
         }
@@ -227,6 +233,8 @@ class ComposeMainActivity : AppCompatActivity() {
         onSizeChange: (Int) -> Unit,
         onHeightChange: (Int) -> Unit,
         onAlphaChange: (Float) -> Unit,
+        onSelectSpeaker: () -> Unit = {},
+        onSelectDevice: (String) -> Unit = {},
         onCenterClick: () -> Unit,
         onMaximizeClick: () -> Unit,
         onDefaultClick: () -> Unit,
@@ -275,12 +283,17 @@ class ComposeMainActivity : AppCompatActivity() {
                     currentPosition = uiState.currentPosition,
                     duration = uiState.duration,
                     isMuted = uiState.isMuted,
+                    audioOutputMode = uiState.audioOutputMode,
+                    connectedClients = uiState.connectedClients,
+                    selectedClientId = uiState.selectedClientId,
                     onPlayPause = onPlayPause,
                     onStop = onStop,
                     onPrevious = onPrevious,
                     onNext = onNext,
                     onMute = onMute,
                     onSeek = { onSeek(it.toLong()) },
+                    onSelectSpeaker = onSelectSpeaker,
+                    onSelectDevice = onSelectDevice,
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -676,6 +689,7 @@ class ComposeMainActivity : AppCompatActivity() {
         try {
             Log.d("ComposeMainActivity", "开始创建VideoPresentation...")
             VideoPresentation(this, display).apply {
+                audioStreamManager = this@ComposeMainActivity.audioStreamManager
                 videoPresentation = this
                 show()
                 Log.d("ComposeMainActivity", "VideoPresentation.show()调用成功")
@@ -848,6 +862,35 @@ class ComposeMainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 初始化音频流管理器
+     */
+    private fun initializeAudioStreamManager() {
+        audioStreamManager = com.example.floatingscreencasting.audio.AudioStreamManager(this)
+        audioStreamManager?.onCommandReceived = { action, params ->
+            lifecycleScope.launch(Dispatchers.Main) {
+                videoPresentation?.handleRemoteCommand(action, params)
+            }
+        }
+        audioStreamManager?.onClientListChanged = { clients ->
+            val streamClients = clients.map {
+                StreamClient(it.id, it.name, it.platform, it.address)
+            }
+            _uiState.value = _uiState.value.copy(connectedClients = streamClients)
+        }
+        audioStreamManager?.onOutputModeChanged = { muted ->
+            lifecycleScope.launch(Dispatchers.Main) {
+                videoPresentation?.setMuted(muted)
+                _uiState.value = _uiState.value.copy(
+                    isMuted = muted,
+                    audioOutputMode = if (muted) "phone" else "speaker"
+                )
+            }
+        }
+        audioStreamManager?.start()
+        Log.d("ComposeMainActivity", "AudioStreamManager 已启动")
+    }
+
     private fun loadSettings() {
         val savedSettings = preferencesManager.windowPosition
         val aspectRatio = when (savedSettings.aspectRatio) {
@@ -916,6 +959,17 @@ class ComposeMainActivity : AppCompatActivity() {
                                 duration = duration
                             )
                         }
+
+                        // 同步播放状态到音频流管理器（供手机端状态同步）
+                        audioStreamManager?.setPlaybackState(
+                            com.example.floatingscreencasting.audio.AudioStreamServer.PlaybackState(
+                                isPlaying = isPlaying,
+                                positionMs = player.currentPosition,
+                                durationMs = player.duration,
+                                title = "",
+                                audioOutput = if (_uiState.value.audioOutputMode == "phone") "phone" else "speaker"
+                            )
+                        )
                     }
                 } catch (e: Exception) {
                     Log.e("ComposeMainActivity", "进度更新失败", e)
@@ -954,6 +1008,7 @@ class ComposeMainActivity : AppCompatActivity() {
         displayManager.unregisterDisplayListener(displayListener)
         unregisterReceiver(playbackErrorReceiver)
         EventBus.getDefault().unregister(this)
+        audioStreamManager?.stop()
         videoPresentation?.dismiss()
     }
 
@@ -993,7 +1048,20 @@ data class MainUiState(
     val availableDisplays: List<DisplayInfo> = emptyList(),
     val hasContinueWatching: Boolean = false,
     val lastPlayedTitle: String = "",
-    val lastPlayedProgress: Int = 0
+    val lastPlayedProgress: Int = 0,
+    val audioOutputMode: String = "speaker",
+    val connectedClients: List<StreamClient> = emptyList(),
+    val selectedClientId: String? = null
+)
+
+/**
+ * 已连接的音频流客户端
+ */
+data class StreamClient(
+    val id: String,
+    val name: String,
+    val platform: String,
+    val address: String
 )
 
 // DisplayInfo已定义在com.example.floatingscreencasting.ui.composable包中
