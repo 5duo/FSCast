@@ -140,6 +140,11 @@ The floating window on the driving display:
 - `CLAUDE.md` - This file (Claude Code development guide)
 - `docs/README.md` - Technical documentation index
 - `docs/DLNA_DISCOVERY_MECHANISM.md` - DLNA discovery mechanism details
+- `docs/protocol/AUDIO_STREAMING_PROTOCOL.md` - WiFi PCM audio streaming protocol (shared by all three apps)
+
+### Companion App Files
+- `companion-android/` - Android phone companion app (FSCast Remote)
+- `companion-harmony/` - HarmonyOS phone companion app (FSCast Remote)
 
 ## Completed Features
 
@@ -159,6 +164,12 @@ The floating window on the driving display:
 ### 🔬 Researched (Not Implemented)
 - [ ] Bluetooth audio output (system restriction - requires system-level whitelist)
 - [ ] SCO audio channel (blocked by AudioService permission)
+
+### 🚧 In Development
+- [ ] WiFi PCM audio streaming to phone companion app (bypasses A2DP restriction)
+- [ ] Phone companion app (HarmonyOS version - FSCast Remote)
+- [ ] Phone companion app (Android version - FSCast Remote)
+- [ ] Multi-device support (multiple phones connected simultaneously)
 
 ## Development Notes
 

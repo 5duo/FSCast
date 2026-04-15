@@ -44,3 +44,16 @@ Thumbs.db
 *.zip
 *.tar.gz
 *.rar
+
+# 鸿蒙项目构建产物
+companion-harmony/.preview/
+companion-harmony/build/
+companion-harmony/entry/build/
+companion-harmony/.cxx/
+companion-harmony/node_modules/
+companion-harmony/oh_modules/
+companion-harmony/hvigor/
+companion-harmony/.hvigor/
+
+# Android companion 构建产物
+companion-android/build/
