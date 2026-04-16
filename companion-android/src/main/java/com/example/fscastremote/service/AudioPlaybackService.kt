@@ -35,6 +35,7 @@ class AudioPlaybackService : Service() {
 
     private val audioPlayer = AudioTrackPlayer()
     private var audioStreamClient: AudioStreamClient? = null
+    private var discoveryClient: DiscoveryClient? = null
     private var bluetoothMonitor: com.example.fscastremote.bluetooth.BluetoothMonitor? = null
     private var audioFocusManager: AudioFocusManager? = null
 
@@ -68,6 +69,8 @@ class AudioPlaybackService : Service() {
                 Log.i(TAG, "Format received: ${format.sampleRate}Hz, ${format.channels}ch")
             }
         }
+
+        discoveryClient = DiscoveryClient()
 
         bluetoothMonitor = com.example.fscastremote.bluetooth.BluetoothMonitor(this).apply {
             onBluetoothDisconnected = {
@@ -125,6 +128,8 @@ class AudioPlaybackService : Service() {
     }
 
     fun getAudioStreamClient(): AudioStreamClient? = audioStreamClient
+
+    fun getDiscoveryClient(): DiscoveryClient? = discoveryClient
 
     fun getPlaybackState(): StateFlow<PlaybackState>? = audioStreamClient?.playbackState
 

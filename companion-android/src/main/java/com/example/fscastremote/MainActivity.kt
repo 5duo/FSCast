@@ -6,6 +6,7 @@ import android.content.ServiceConnection
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -17,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -25,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.fscastremote.model.ConnectionInfo
 import com.example.fscastremote.model.ConnectionState
 import com.example.fscastremote.service.AudioPlaybackService
 import com.example.fscastremote.ui.components.MainScreen
@@ -98,6 +101,8 @@ class MainActivity : ComponentActivity() {
     fun MainApp() {
         val scope = rememberCoroutineScope()
         var serverIp by remember { mutableStateOf("") }
+        val discoveredDevices = remember { mutableStateListOf<ConnectionInfo>() }
+        var isDiscovering by remember { mutableStateOf(false) }
 
         val isConnected = serviceBinder?.getService()?.getIsConnected() ?: false
         val connectionState = serviceBinder?.getService()?.getConnectionState()
@@ -122,6 +127,8 @@ class MainActivity : ComponentActivity() {
                 connectionState = connectionState,
                 playbackState = playbackState,
                 serverIp = serverIp,
+                discoveredDevices = discoveredDevices.toList(),
+                isDiscovering = isDiscovering,
                 onConnect = { ip ->
                     scope.launch {
                         serviceBinder?.getService()?.connect(ip, 19880)
@@ -158,7 +165,39 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 onDiscover = {
-                    // TODO: 实现 UDP 发现
+                    scope.launch {
+                        isDiscovering = true
+                        discoveredDevices.clear()
+                        try {
+                            val devices = serviceBinder?.getService()?.getDiscoveryClient()?.discover() ?: emptyList()
+                            discoveredDevices.addAll(devices)
+                            if (devices.isNotEmpty()) {
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    "发现 ${devices.size} 台设备",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                // 自动连接第一个设备
+                                val firstDevice = devices.first()
+                                serviceBinder?.getService()?.connect(firstDevice.ip, firstDevice.port)
+                                serverIp = firstDevice.ip
+                            } else {
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    "未发现设备，请确保车机已启动",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        } catch (e: Exception) {
+                            Toast.makeText(
+                                this@MainActivity,
+                                "发现失败: ${e.message}",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } finally {
+                            isDiscovering = false
+                        }
+                    }
                 }
             )
         }

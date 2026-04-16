@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.fscastremote.model.ConnectionInfo
 import com.example.fscastremote.model.ConnectionState
 
 @Composable
@@ -41,6 +42,8 @@ fun ConnectionPanel(
     isConnected: Boolean,
     connectionState: ConnectionState,
     serverIp: String,
+    discoveredDevices: List<ConnectionInfo> = emptyList(),
+    isDiscovering: Boolean = false,
     onConnect: (String) -> Unit,
     onDisconnect: () -> Unit,
     onDiscover: () -> Unit
@@ -149,7 +152,7 @@ fun ConnectionPanel(
                             ) {
                                 Button(
                                     onClick = { if (inputIp.isNotEmpty()) onConnect(inputIp) },
-                                    enabled = inputIp.isNotEmpty(),
+                                    enabled = inputIp.isNotEmpty() && !isDiscovering,
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = Color(0xFF6366F1),
                                         contentColor = Color.White
@@ -162,18 +165,68 @@ fun ConnectionPanel(
 
                                 Button(
                                     onClick = onDiscover,
+                                    enabled = !isDiscovering,
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFF334155),
+                                        containerColor = if (isDiscovering) Color(0xFF334155).copy(alpha = 0.5f) else Color(0xFF334155),
                                         contentColor = Color.White
                                     ),
                                     shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier.size(40.dp)
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Search,
-                                        contentDescription = "发现设备",
-                                        modifier = Modifier.size(20.dp)
+                                    if (isDiscovering) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            color = Color.White,
+                                            strokeWidth = 2.dp
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Default.Search,
+                                            contentDescription = "发现设备",
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 显示发现的设备列表
+                            if (discoveredDevices.isNotEmpty()) {
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "发现的设备:",
+                                        fontSize = 12.sp,
+                                        color = Color(0xFF94A3B8)
                                     )
+                                    discoveredDevices.forEach { device ->
+                                        Button(
+                                            onClick = { onConnect(device.ip) },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = Color(0xFF1E293B),
+                                                contentColor = Color.White
+                                            ),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.fillMaxWidth().height(36.dp)
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalAlignment = Alignment.Start
+                                            ) {
+                                                Text(
+                                                    text = device.name,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFFF1F5F9)
+                                                )
+                                                Text(
+                                                    text = "${device.ip}:${device.port}",
+                                                    fontSize = 11.sp,
+                                                    color = Color(0xFF94A3B8)
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

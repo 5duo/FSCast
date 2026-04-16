@@ -39,6 +39,8 @@ fun MainScreen(
     connectionState: ConnectionState,
     playbackState: PlaybackState?,
     serverIp: String,
+    discoveredDevices: List<com.example.fscastremote.model.ConnectionInfo> = emptyList(),
+    isDiscovering: Boolean = false,
     onConnect: (String) -> Unit,
     onDisconnect: () -> Unit,
     onPlay: () -> Unit,
@@ -61,6 +63,8 @@ fun MainScreen(
             isConnected = isConnected,
             connectionState = connectionState,
             serverIp = serverIp,
+            discoveredDevices = discoveredDevices,
+            isDiscovering = isDiscovering,
             onConnect = onConnect,
             onDisconnect = onDisconnect,
             onDiscover = onDiscover
