@@ -10,6 +10,7 @@ import { DlnaHttpServer } from '../service/DlnaHttpServer'
 import { VideoPlayer } from '../service/VideoPlayer'
 import { SyncClient } from '../service/SyncClient'
 import { PhoneDiscoveryResponse } from '../service/PhoneDiscoveryResponse'
+import { CarWebSocketClient } from '../service/CarWebSocketClient'
 
 const TAG = 'IndexPage'
 const DOMAIN = 0x0000
@@ -23,16 +24,20 @@ struct Index {
   private videoPlayer: VideoPlayer = new VideoPlayer()
   private syncClient: SyncClient = new SyncClient()
   private phoneDiscoveryResponse: PhoneDiscoveryResponse = new PhoneDiscoveryResponse()
+  private carWebSocketClient: CarWebSocketClient = new CarWebSocketClient()
+
+  // ===== 车机端IP地址 =====
+  private carIpAddress: string = '192.168.31.176'  // 默认车机IP，用户可以修改
 
   // ===== DLNA DMR状态 =====
   @State @Watch('onDlnaUriChanged') dlnaUri: string = ''  // 接收到的DLNA播放URI
+  @State dlnaHttpHeaders: Record<string, string> = {}  // 接收到的HTTP头
   @State dlnaIsPlaying: boolean = false
   @State dlnaPosition: number = 0
   @State dlnaDuration: number = 0
 
   // ===== 同步状态 =====
   @State syncConnected: boolean = false
-  @State carIpAddress: string = ''
 
   // ===== 播放模式 =====
   @State playbackMode: 'audio_only' | 'video_audio' = 'audio_only'
@@ -72,9 +77,50 @@ struct Index {
       this.discoveryResponseRunning = true
       hilog.info(DOMAIN, TAG, '设备发现响应服务已启动')
 
+      // 连接到车机端WebSocket
+      this.connectToCar()
+
     } catch (error) {
       hilog.error(DOMAIN, TAG, `启动服务失败: ${JSON.stringify(error)}`)
     }
+  }
+
+  /**
+   * 连接到车机端
+   */
+  private connectToCar(): void {
+    hilog.info(DOMAIN, TAG, `尝试连接到车机端: ${this.carIpAddress}`)
+
+    // 设置WebSocket回调
+    this.carWebSocketClient.setOnPlayCommand((uri: string, httpHeaders: Record<string, string>) => {
+      hilog.info(DOMAIN, TAG, `收到播放命令: ${uri.substring(0, 50)}...`)
+      hilog.info(DOMAIN, TAG, `HTTP头: ${JSON.stringify(httpHeaders)}`)
+
+      // 更新状态
+      this.dlnaUri = uri
+      this.dlnaHttpHeaders = httpHeaders
+
+      // 播放视频
+      this.playVideo()
+    })
+
+    this.carWebSocketClient.setOnPauseCommand(() => {
+      hilog.info(DOMAIN, TAG, '收到暂停命令')
+      this.pauseVideo()
+    })
+
+    this.carWebSocketClient.setOnStopCommand(() => {
+      hilog.info(DOMAIN, TAG, '收到停止命令')
+      this.stopVideo()
+    })
+
+    this.carWebSocketClient.setOnSeekCommand((position: number) => {
+      hilog.info(DOMAIN, TAG, `收到跳转命令: ${position}`)
+      this.seekVideo(position)
+    })
+
+    // 连接到车机端
+    this.carWebSocketClient.connect(this.carIpAddress)
   }
 
   /**
@@ -156,18 +202,17 @@ struct Index {
     }
 
     try {
-      if (this.playbackMode === 'video_audio') {
-        // 视频+音频模式：播放完整视频
-        await this.videoPlayer.play(this.dlnaUri)
-      } else {
-        // 仅音频模式：只播放音频（需要将视频URL转换为音频URL）
-        // 暂时使用视频URL，后续可以优化
-        await this.videoPlayer.play(this.dlnaUri)
-      }
+      hilog.info(DOMAIN, TAG, `开始播放视频，HTTP头数量: ${Object.keys(this.dlnaHttpHeaders).length}`)
+
+      // 确保使用视频+音频模式（完整播放）
+      // 传递HTTP头以支持B站反爬虫验证
+      await this.videoPlayer.play(this.dlnaUri, this.dlnaHttpHeaders)
 
       this.dlnaIsPlaying = true
+      hilog.info(DOMAIN, TAG, '视频播放成功')
     } catch (error) {
       hilog.error(DOMAIN, TAG, `播放失败: ${JSON.stringify(error)}`)
+      this.dlnaIsPlaying = false
     }
   }
 
@@ -218,6 +263,9 @@ struct Index {
     this.phoneDiscoveryResponse.stop()
     this.syncClient.disconnect()
     this.videoPlayer.release()
+
+    // 断开车机端连接
+    this.carWebSocketClient.disconnect()
   }
 
   /**

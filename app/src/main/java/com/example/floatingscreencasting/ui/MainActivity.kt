@@ -22,7 +22,10 @@ import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.Player
 import com.example.floatingscreencasting.R
 import com.example.floatingscreencasting.databinding.ActivityMainBinding
+import com.example.floatingscreencasting.dlna.AudioOutputController
+import com.example.floatingscreencasting.dlna.DlnaDmcClient
 import com.example.floatingscreencasting.dlna.DlnaDmrService
+import com.example.floatingscreencasting.dlna.PhoneDeviceManager
 import com.example.floatingscreencasting.events.MuteEvent
 import com.example.floatingscreencasting.presentation.VideoPresentation
 import kotlinx.coroutines.launch
@@ -51,6 +54,11 @@ class MainActivity : AppCompatActivity() {
 
     // DLNA服务
     private lateinit var dlnaService: DlnaDmrService
+
+    // 音频输出控制器
+    private lateinit var audioOutputController: AudioOutputController
+    private lateinit var dlnaDmcClient: DlnaDmcClient
+    private lateinit var phoneDeviceManager: PhoneDeviceManager
 
     // 当前选中的比例
     private var currentAspectRatio = "16:9"
@@ -165,6 +173,9 @@ class MainActivity : AppCompatActivity() {
 
         // 初始化静音按钮状态
         updateMuteButton()
+
+        // 初始化音频输出控制器
+        initializeAudioOutputController()
 
         // 初始化并启动DLNA服务
         initializeDlnaService()
@@ -673,6 +684,59 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * 初始化音频输出控制器
+     */
+    private fun initializeAudioOutputController() {
+        // 初始化DLNA DMC客户端（用于发现和控制手机设备）
+        dlnaDmcClient = DlnaDmcClient(this)
+
+        // 初始化手机设备管理器
+        phoneDeviceManager = PhoneDeviceManager(this)
+
+        // 初始化音频输出控制器
+        audioOutputController = AudioOutputController(dlnaDmcClient, phoneDeviceManager)
+
+        // 设置静音控制回调
+        audioOutputController.setMuteControlCallback(object : AudioOutputController.MuteControlCallback {
+            override fun setMuted(muted: Boolean) {
+                // 通知VideoPresentation静音/取消静音
+                videoPresentation?.setMuted(muted)
+                Log.d("MainActivity", "音频输出控制器请求静音: $muted")
+            }
+        })
+
+        // 设置播放状态监听器
+        audioOutputController.setPlaybackStateListener(object : AudioOutputController.PlaybackStateListener {
+            override fun onPlay() {
+                videoPresentation?.play()
+            }
+
+            override fun onPause() {
+                videoPresentation?.pause()
+            }
+
+            override fun onSeek(positionMs: Long) {
+                videoPresentation?.seekTo(positionMs)
+            }
+
+            override fun onStop() {
+                videoPresentation?.stop()
+            }
+        })
+
+        // 启动DLNA DMC客户端（开始发现手机设备）
+        dlnaDmcClient.start()
+
+        // 监听设备列表变化
+        dlnaDmcClient.onDeviceListChanged = { devices ->
+            phoneDeviceManager.updateDevices(devices)
+            Log.d("MainActivity", "发现 ${devices.size} 个DLNA设备")
+        }
+
+        Log.d("MainActivity", "音频输出控制器初始化完成")
+    }
+
+    /**
      * 初始化DLNA服务
      */
     private fun initializeDlnaService() {
@@ -687,11 +751,17 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this@MainActivity, error, Toast.LENGTH_SHORT).show()
             }
 
-            onPlayMedia = { uri ->
+            onPlayMedia = { uri, httpHeaders ->
+                // 保存当前视频URI和HTTP头到音频输出控制器
+                audioOutputController.setCurrentVideoUri(uri, httpHeaders)
+
+                // 播放视频
                 videoPresentation?.playMedia(uri)
                 if (uri.isNotEmpty()) {
                     dlnaService.updateTransportState("PLAYING")
                 }
+
+                Log.d("MainActivity", "DLNA投屏: URI长度=${uri.length}, HTTP头数量=${httpHeaders.size}")
             }
 
             onStopMedia = {
@@ -775,6 +845,10 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             dlnaService.stop()
         }
+
+        // 停止并释放音频输出控制器
+        audioOutputController.release()
+        dlnaDmcClient.stop()
 
         displayManager.unregisterDisplayListener(displayListener)
         videoPresentation?.dismiss()

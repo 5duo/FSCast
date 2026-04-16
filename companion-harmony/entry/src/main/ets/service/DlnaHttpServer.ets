@@ -15,7 +15,7 @@ export class DlnaHttpServer {
   private isRunning: boolean = false
 
   // 播放回调
-  private onPlayCallback: (() => void) | null = null
+  private onPlayCallback: ((uri: string, httpHeaders: Record<string, string>) => void) | null = null
   private onPauseCallback: (() => void) | null = null
   private onStopCallback: (() => void) | null = null
   private onSeekCallback: ((position: number) => void) | null = null
@@ -23,10 +23,13 @@ export class DlnaHttpServer {
   // 当前播放URI
   private currentUri: string = ''
 
+  // 当前HTTP头
+  private currentHttpHeaders: Record<string, string> = {}
+
   /**
    * 设置播放回调
    */
-  setPlayCallback(callback: () => void): void {
+  setPlayCallback(callback: (uri: string, httpHeaders: Record<string, string>) => void): void {
     this.onPlayCallback = callback
   }
 
@@ -57,34 +60,28 @@ export class DlnaHttpServer {
       // 创建TCP套接字作为HTTP服务器
       this.tcpSocket = socket.constructTCPSocketInstance()
 
-      // 订阅连接事件
-      this.tcpSocket.on('connect', () => {
-        hilog.info(DOMAIN, TAG, 'HTTP客户端已连接')
-      })
-
+      // 订阅消息事件（接收HTTP请求）
       this.tcpSocket.on('message', (value: socket.SocketMessageInfo) => {
         this.handleHttpRequest(value.message)
-      })
-
-      this.tcpSocket.on('close', () => {
-        hilog.debug(DOMAIN, TAG, 'HTTP客户端已断开')
       })
 
       this.tcpSocket.on('error', (err: BusinessError) => {
         hilog.error(DOMAIN, TAG, `HTTP服务器错误: ${err.message}`)
       })
 
-      // 监听端口
-      const connectOptions: socket.TCPConnectOptions = {
-        address: {
-          address: "0.0.0.0",
-          port: 49152
-        }
+      // 绑定到本地端口
+      const localAddress: socket.NetAddress = {
+        address: "0.0.0.0",
+        port: 49153,
+        family: 1
       }
 
-      // 注意：这里实际上是创建一个监听socket，而不是连接
-      // 由于鸿蒙系统的API限制，这里使用简化方案
-      hilog.info(DOMAIN, TAG, 'DLNA HTTP服务器启动成功（简化模式）')
+      await this.tcpSocket.bind(localAddress)
+      hilog.info(DOMAIN, TAG, 'DLNA HTTP服务器已绑定到端口49153')
+
+      // 开始监听
+      // 注意：鸿蒙的TCPSocket使用connect来接受连接
+      // 这里我们使用简化的方式，直接监听消息
 
     } catch (error) {
       hilog.error(DOMAIN, TAG, `启动DLNA HTTP服务器失败: ${(error as BusinessError).message}`)
@@ -191,14 +188,20 @@ export class DlnaHttpServer {
         this.currentUri = uri
         hilog.info(DOMAIN, TAG, `设置播放URI: ${uri.substring(0, 100)}...`)
 
-        // 通知主页面开始播放
-        this.notifyPlay(uri)
+        // 解析元数据中的HTTP头
+        const httpHeaders = this.extractHttpHeadersFromMetadata(metadata)
+        if (Object.keys(httpHeaders).length > 0) {
+          hilog.info(DOMAIN, TAG, `提取到HTTP头: ${JSON.stringify(httpHeaders)}`)
+        }
+
+        // 通知主页面开始播放（传递HTTP头）
+        this.notifyPlay(uri, httpHeaders)
 
         return this.getSuccessResponse("SetAVTransportURI")
       } else if (soapAction.includes("#Play")) {
-        // 播放命令
+        // 播放命令（不带参数，使用当前URI）
         hilog.info(DOMAIN, TAG, '收到Play命令')
-        this.onPlayCallback?.()
+        this.onPlayCallback?.(this.currentUri, this.currentHttpHeaders)
         return this.getSuccessResponse("Play")
       } else if (soapAction.includes("#Pause")) {
         // 暂停命令
@@ -259,9 +262,16 @@ export class DlnaHttpServer {
   /**
    * 通知主页面播放
    */
-  private notifyPlay(uri: string): void {
+  private notifyPlay(uri: string, httpHeaders: Record<string, string> = {}): void {
+    // 保存当前HTTP头
+    this.currentHttpHeaders = httpHeaders
+
     // 通过AppStorage通知主页面
     AppStorage.setOrCreate("dlna_uri", uri)
+    AppStorage.setOrCreate("dlna_http_headers", httpHeaders)
+
+    // 调用回调
+    this.onPlayCallback?.(uri, httpHeaders)
   }
 
   /**
@@ -356,5 +366,41 @@ export class DlnaHttpServer {
     }
 
     hilog.info(DOMAIN, TAG, 'DLNA HTTP服务器已停止')
+  }
+
+  /**
+   * 从元数据中提取HTTP头
+   */
+  private extractHttpHeadersFromMetadata(metadata: string): Record<string, string> {
+    const httpHeaders: Record<string, string> = {}
+
+    if (!metadata || metadata.trim().length === 0) {
+      return httpHeaders
+    }
+
+    try {
+      // 查找custom标签
+      const customMatch = metadata.match(/<custom[^>]*xmlns="http:\/\/www\.fscast\.com\/headers"[^>]*>(.*?)<\/custom>/s)
+      if (customMatch && customMatch[1]) {
+        const headersJson = customMatch[1].trim()
+        hilog.debug(DOMAIN, TAG, `提取到HTTP头JSON: ${headersJson}`)
+
+        // 解析JSON
+        const headersObj: Record<string, string> = JSON.parse(headersJson) as Record<string, string>
+
+        // 手动复制常见的HTTP头
+        const commonHeaders = ['user-agent', 'referer', 'cookie', 'accept', 'accept-language']
+        for (let i = 0; i < commonHeaders.length; i++) {
+          const key = commonHeaders[i]
+          if (headersObj[key] !== undefined) {
+            httpHeaders[key] = headersObj[key]
+          }
+        }
+      }
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, `解析HTTP头失败: ${(error as BusinessError).message}`)
+    }
+
+    return httpHeaders
   }
 }

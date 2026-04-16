@@ -95,7 +95,7 @@ export class VideoPlayer {
   /**
    * 播放视频
    */
-  async play(uri: string): Promise<void> {
+  async play(uri: string, httpHeaders: Record<string, string> = {}): Promise<void> {
     if (!this.avPlayer) {
       hilog.warn(DOMAIN, TAG, 'Not initialized')
       return
@@ -104,8 +104,24 @@ export class VideoPlayer {
     try {
       this.currentUri = uri
 
-      // 设置视频URL
-      this.avPlayer.url = uri
+      // 设置HTTP头（如果支持）
+      if (Object.keys(httpHeaders).length > 0) {
+        hilog.info(DOMAIN, TAG, `设置HTTP头: ${JSON.stringify(httpHeaders)}`)
+
+        // 使用鸿蒙的createMediaSourceWithUrl API设置HTTP头
+        const mediaSource = media.createMediaSourceWithUrl(uri, httpHeaders)
+        const playbackStrategy: media.PlaybackStrategy = {
+          preferredWidth: 1920,
+          preferredHeight: 1080,
+          preferredBufferDuration: 3,
+          preferredHdr: false
+        }
+
+        this.avPlayer.setMediaSource(mediaSource, playbackStrategy)
+      } else {
+        // 直接设置URL
+        this.avPlayer.url = uri
+      }
 
       // 开始播放
       await this.avPlayer.play()

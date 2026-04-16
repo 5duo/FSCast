@@ -112,6 +112,9 @@ dependencies {
     implementation(libs.nanohttpd)
     implementation(libs.nanohttpd.webserver)
 
+    // Java-WebSocket (WebSocket服务器)
+    implementation("org.java-websocket:Java-WebSocket:1.5.4")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

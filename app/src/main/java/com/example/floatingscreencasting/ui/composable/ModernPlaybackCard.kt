@@ -39,12 +39,16 @@ fun ModernPlaybackControlCard(
     duration: Long,
     isMuted: Boolean,
     audioOutputMode: String = "speaker",
+    connectedPhoneDevice: String? = null,
+    phoneDeviceCount: Int = 0,
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onMute: () -> Unit,
     onSeek: (Float) -> Unit,
+    onAudioOutputChange: () -> Unit = {},
+    onScanDevices: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     ModernCard(modifier = modifier) {
@@ -67,6 +71,17 @@ fun ModernPlaybackControlCard(
 
             Spacer(modifier = Modifier.height(20.dp))
 
+            // 音频输出选择器
+            AudioOutputSelector(
+                currentMode = audioOutputMode,
+                connectedDevice = connectedPhoneDevice,
+                deviceCount = phoneDeviceCount,
+                onModeChange = onAudioOutputChange,
+                onScanDevices = onScanDevices
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
             // 进度条
             ModernProgressBar(
                 currentPosition = currentPosition,
@@ -80,12 +95,144 @@ fun ModernPlaybackControlCard(
             ModernPlaybackControls(
                 isPlaying = isPlaying,
                 isMuted = isMuted,
+                audioOutputMode = audioOutputMode,
                 onPlayPause = onPlayPause,
                 onStop = onStop,
                 onPrevious = onPrevious,
                 onNext = onNext,
-                onMute = onMute
+                onMute = onMute,
+                onAudioOutputChange = onAudioOutputChange
             )
+        }
+    }
+}
+
+/**
+ * 音频输出选择器
+ * 显示当前输出模式和设备状态
+ */
+@Composable
+private fun AudioOutputSelector(
+    currentMode: String,
+    connectedDevice: String?,
+    deviceCount: Int,
+    onModeChange: () -> Unit,
+    onScanDevices: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = SurfaceVariant.copy(alpha = 0.3f),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .padding(16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // 左侧：当前输出模式
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = if (currentMode == "phone") "📱" else "🔊",
+                style = MaterialTheme.typography.titleLarge,
+                color = if (currentMode == "phone") Color(0xFF6366F1) else OnSurface
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = "音频输出",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurfaceVariant
+                )
+                Text(
+                    text = if (currentMode == "phone") "FSCast Remote" else "车机扬声器",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = OnSurface,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        // 中间：设备状态
+        if (currentMode == "phone") {
+            if (connectedDevice != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(
+                                color = Color(0xFF10B981),
+                                shape = CircleShape
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = connectedDevice,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OnSurfaceVariant
+                    )
+                }
+            } else {
+                Text(
+                    text = "未连接",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFFF59E0B)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        // 右侧：切换按钮或扫描按钮
+        if (currentMode == "phone" && connectedDevice == null) {
+            // 显示扫描按钮
+            Surface(
+                onClick = onScanDevices,
+                shape = RoundedCornerShape(8.dp),
+                color = Color(0xFF6366F1).copy(alpha = 0.1f)
+            ) {
+                Text(
+                    text = "扫描设备",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF6366F1),
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        } else {
+            // 显示切换按钮
+            Surface(
+                onClick = onModeChange,
+                shape = RoundedCornerShape(8.dp),
+                color = SurfaceVariant
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = if (currentMode == "phone") "切换到车机" else "切换到手机",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OnSurface,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "→",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OnSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }
@@ -212,11 +359,13 @@ private fun TimeLabel(time: Long, label: String) {
 private fun ModernPlaybackControls(
     isPlaying: Boolean,
     isMuted: Boolean,
+    audioOutputMode: String,
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    onMute: () -> Unit
+    onMute: () -> Unit,
+    onAudioOutputChange: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -263,10 +412,21 @@ private fun ModernPlaybackControls(
 
         Spacer(modifier = Modifier.width(12.dp))
 
+        // 音频输出切换
+        ModernControlButton(
+            onClick = onAudioOutputChange,
+            icon = if (audioOutputMode == "phone") "📱" else "🔊",
+            contentDescription = if (audioOutputMode == "phone") "输出到手机" else "输出到车机",
+            size = 50.dp,
+            tint = if (audioOutputMode == "phone") Color(0xFF6366F1) else OnSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.width(12.dp))
+
         // 静音（统一风格）
         ModernControlButton(
             onClick = onMute,
-            icon = if (isMuted) "🔇" else "🔊",
+            icon = if (isMuted) "🔇" else "🔈",
             contentDescription = if (isMuted) "取消静音" else "静音",
             size = 50.dp
         )

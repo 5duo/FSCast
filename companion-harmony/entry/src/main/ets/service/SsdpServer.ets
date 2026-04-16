@@ -20,6 +20,7 @@ export class SsdpServer {
 
   /**
    * 启动SSDP服务
+   * 只发送NOTIFY，不监听M-SEARCH，避免与其他应用冲突
    */
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -30,29 +31,18 @@ export class SsdpServer {
     try {
       this.isRunning = true
 
-      // 创建多播套接字
+      // 创建多播套接字（只用于发送，不绑定1900端口）
       this.multicastSocket = socket.constructMulticastSocketInstance()
 
-      // 绑定到本地端口
+      // 绑定到随机端口（系统自动分配）
       let localAddr: socket.NetAddress = {
         address: "0.0.0.0",
-        port: SsdpServer.SSDP_PORT,
+        port: 0,  // 使用0让系统自动分配端口
         family: 1
       }
       await this.multicastSocket.bind(localAddr)
 
-      // 加入多播组
-      let multicastAddr: socket.NetAddress = {
-        address: SsdpServer.SSDP_ADDRESS,
-        port: SsdpServer.SSDP_PORT,
-        family: 1
-      }
-      await this.multicastSocket.addMembership(multicastAddr)
-
-      hilog.info(DOMAIN, TAG, 'SSDP服务启动成功，已加入多播组')
-
-      // 启动监听
-      this.listenForMSearch()
+      hilog.info(DOMAIN, TAG, 'SSDP服务启动成功，仅发送NOTIFY模式')
 
       // 定期发送NOTIFY
       this.startNotifyPeriodically()
@@ -125,11 +115,15 @@ export class SsdpServer {
 
     try {
       const deviceUuid = "583f8100-1de2-11db-8981-000c298458a8"
+
+      // 获取本地IP地址
+      const localIp = this.getLocalIpAddress()
+
       const notifyMessage =
 `NOTIFY * HTTP/1.1
 HOST: ${SsdpServer.SSDP_ADDRESS}:${SsdpServer.SSDP_PORT}
 CACHE-CONTROL: max-age=1800
-LOCATION: http://localhost:49152/description.xml
+LOCATION: http://${localIp}:49153/description.xml
 NT: urn:schemas-upnp-org:device:MediaRenderer:1
 NTS: ssdp:alive
 SERVER: FSCast Remote/1.0 UPnP/1.0 DLNADOC/1.50
@@ -162,11 +156,13 @@ USN: uuid:${deviceUuid}::urn:schemas-upnp-org:device:MediaRenderer:1
 
     try {
       const deviceUuid = "583f8100-1de2-11db-8981-000c298458a8"
+      const localIp = this.getLocalIpAddress()
+
       const searchResponse =
 `HTTP/1.1 200 OK
 CACHE-CONTROL: max-age=1800
 EXT:
-LOCATION: http://localhost:49152/description.xml
+LOCATION: http://${localIp}:49153/description.xml
 SERVER: FSCast Remote/1.0 UPnP/1.0 DLNADOC/1.50
 ST: urn:schemas-upnp-org:device:MediaRenderer:1
 USN: uuid:${deviceUuid}::urn:schemas-upnp-org:device:MediaRenderer:1
@@ -220,5 +216,15 @@ USN: uuid:${deviceUuid}::urn:schemas-upnp-org:device:MediaRenderer:1
     }
 
     hilog.info(DOMAIN, TAG, 'SSDP服务已停止')
+  }
+
+  /**
+   * 获取本地IP地址
+   * TODO: 实际应该动态获取WiFi接口的IP地址
+   * 目前使用固定IP，用户需要根据实际网络环境修改
+   */
+  private getLocalIpAddress(): string {
+    // 用户手机的实际IP地址
+    return "192.168.88.60"
   }
 }

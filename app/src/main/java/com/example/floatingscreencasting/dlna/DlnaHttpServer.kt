@@ -53,7 +53,7 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
         }
     }
 
-    private var onPlayCommand: ((String) -> Unit)? = null
+    private var onPlayCommand: ((String, Map<String, String>) -> Unit)? = null
     private var onStopCommand: (() -> Unit)? = null
     private var onPauseCommand: (() -> Unit)? = null
     private var onSeekCommand: ((String) -> Unit)? = null
@@ -62,10 +62,13 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
     private var onGetDuration: (() -> Long)? = null
     private var onGetPosition: (() -> Long)? = null
 
+    // 保存最后一次的HTTP头
+    private var lastHttpHeaders: Map<String, String> = emptyMap()
+
     /**
      * 设置播放命令回调
      */
-    fun setPlayCommand(callback: (String) -> Unit) {
+    fun setPlayCommand(callback: (String, Map<String, String>) -> Unit) {
         onPlayCommand = callback
     }
 
@@ -148,6 +151,9 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
         try {
             val headers = session.headers
             val soapAction = headers["soapaction"] ?: headers["SOAPAction"]
+
+            // 保存HTTP头信息（提取反爬虫相关的头）
+            lastHttpHeaders = extractAntiCrawlerHeaders(headers)
 
             Log.d(TAG, "========== 收到控制请求 ==========")
             Log.d(TAG, "SOAPAction: $soapAction")
@@ -236,7 +242,7 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
 
                 // 异步处理播放命令
                 CoroutineScope(Dispatchers.Main).launch {
-                    onPlayCommand?.invoke(uri)
+                    onPlayCommand?.invoke(uri, lastHttpHeaders)
                 }
 
                 // 返回成功响应
@@ -257,7 +263,7 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                 transportState = "PLAYING"
 
                 CoroutineScope(Dispatchers.Main).launch {
-                    onPlayCommand?.invoke("")
+                    onPlayCommand?.invoke("", lastHttpHeaders)
                 }
 
                 """
@@ -692,5 +698,41 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                 </serviceStateTable>
             </scpd>
         """.trimIndent()
+    }
+
+    /**
+     * 提取反爬虫相关的HTTP头
+     */
+    private fun extractAntiCrawlerHeaders(headers: Map<String, String>): Map<String, String> {
+        val result = mutableMapOf<String, String>()
+
+        // 提取常见的反爬虫HTTP头
+        val antiCrawlerHeaders = listOf(
+            "user-agent",
+            "referer",
+            "cookie",
+            "accept",
+            "accept-language",
+            "accept-encoding"
+        )
+
+        for (header in antiCrawlerHeaders) {
+            val value = headers[header] ?: headers[header.uppercase()]
+                    ?: headers[header.split("-").joinToString("-") { it.capitalize() }]
+            if (value != null) {
+                result[header] = value
+            }
+        }
+
+        // 如果没有User-Agent，使用常见的乐播投屏User-Agent
+        if (!result.containsKey("user-agent")) {
+            result["user-agent"] = "CastTalk/4.3.0 (Linux;Android 13) DLNA/1.0"
+        }
+
+        // 根据URL添加平台特定的Referer
+        // （这里暂时留空，在收到URL后再处理）
+
+        Log.d(TAG, "提取的反爬虫HTTP头: $result")
+        return result
     }
 }

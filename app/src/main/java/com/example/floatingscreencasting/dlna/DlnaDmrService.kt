@@ -13,6 +13,7 @@ import kotlinx.coroutines.*
 data class CastingRequest(
     val uri: String,              // 视频URL
     val metadata: String = "",    // 元数据
+    val httpHeaders: Map<String, String> = emptyMap(),  // HTTP头信息
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -189,9 +190,9 @@ class DlnaDmrService(private val context: Context) {
      * 设置HTTP服务器回调
      */
     private fun setupHttpCallbacks() {
-        httpServer.setPlayCommand { uri ->
+        httpServer.setPlayCommand { uri, httpHeaders ->
             serviceScope.launch {
-                handlePlayCommand(uri)
+                handlePlayCommand(uri, httpHeaders)
             }
         }
 
@@ -231,8 +232,9 @@ class DlnaDmrService(private val context: Context) {
     /**
      * 处理播放命令
      */
-    private suspend fun handlePlayCommand(uri: String) {
+    private suspend fun handlePlayCommand(uri: String, httpHeaders: Map<String, String> = emptyMap()) {
         Log.d(TAG, "处理播放命令: $uri")
+        Log.d(TAG, "HTTP头: $httpHeaders")
 
         if (uri.isBlank()) {
             // 恢复播放（暂停后再播放的情况）
@@ -242,7 +244,10 @@ class DlnaDmrService(private val context: Context) {
         }
 
         // 保存投屏请求（用于同步到手机端）
-        currentCastingRequest = CastingRequest(uri = uri)
+        currentCastingRequest = CastingRequest(
+            uri = uri,
+            httpHeaders = httpHeaders
+        )
         Log.d(TAG, "投屏请求已保存: $uri")
 
         // 提取视频标题（从元数据或URL中）
@@ -253,7 +258,7 @@ class DlnaDmrService(private val context: Context) {
             Log.d(TAG, "onPlayMedia回调是否为null: ${onPlayMedia == null}")
 
             // 通过EventBus或回调通知Presentation播放视频
-            onPlayMedia?.invoke(uri)
+            onPlayMedia?.invoke(uri, httpHeaders)
             Log.d(TAG, "onPlayMedia回调已调用")
 
             onCastingStateChanged?.invoke(true, title)
@@ -315,7 +320,7 @@ class DlnaDmrService(private val context: Context) {
     }
 
     // 媒体控制回调
-    var onPlayMedia: ((String) -> Unit)? = null
+    var onPlayMedia: ((String, Map<String, String>) -> Unit)? = null
     var onStopMedia: (() -> Unit)? = null
     var onPauseMedia: (() -> Unit)? = null
     var onPlay: (() -> Unit)? = null

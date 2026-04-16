@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
+import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,9 +34,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.example.floatingscreencasting.dlna.AudioOutputController
+import com.example.floatingscreencasting.dlna.DlnaDmcClient
 import com.example.floatingscreencasting.dlna.DlnaDmrService
+import com.example.floatingscreencasting.dlna.PhoneDeviceManager
 import com.example.floatingscreencasting.events.MuteEvent
 import com.example.floatingscreencasting.presentation.VideoPresentation
+import com.example.floatingscreencasting.presentation.SingleScreenVideoDialog
 import com.example.floatingscreencasting.ui.composable.*
 import com.example.floatingscreencasting.ui.debug.AudioDebugPanel
 import com.example.floatingscreencasting.ui.theme.FloatingScreenCastingTheme
@@ -54,6 +59,7 @@ class ComposeMainActivity : AppCompatActivity() {
 
     private lateinit var displayManager: DisplayManager
     private var videoPresentation: VideoPresentation? = null
+    private var singleScreenDialog: SingleScreenVideoDialog? = null
     private lateinit var preferencesManager: PreferencesManager
 
     // 播放历史管理器（延迟初始化）
@@ -63,6 +69,11 @@ class ComposeMainActivity : AppCompatActivity() {
 
     // DLNA服务
     private lateinit var dlnaService: DlnaDmrService
+
+    // 音频输出控制器
+    private lateinit var audioOutputController: AudioOutputController
+    private lateinit var dlnaDmcClient: DlnaDmcClient
+    private lateinit var phoneDeviceManager: PhoneDeviceManager
 
     // 驾驶屏固定Display ID 2
     private val drivingDisplayId = 2
@@ -145,8 +156,7 @@ class ComposeMainActivity : AppCompatActivity() {
 
         override fun onDisplayRemoved(displayId: Int) {
             if (videoPresentation?.display?.displayId == displayId) {
-                videoPresentation?.dismiss()
-                videoPresentation = null
+                dismissVideoWindow()
                 _uiState.value = uiState.value.copy(
                     isWindowVisible = false,
                     castingStatus = "等待投屏",
@@ -168,13 +178,21 @@ class ComposeMainActivity : AppCompatActivity() {
 
         preferencesManager = PreferencesManager(this)
 
+        // 初始化音频输出控制器
+        initializeAudioOutputController()
+
         initializeDisplays()
         loadSettings()
         initializeDlnaService()
         updateContinueWatchingStatus()
 
         // 注册广播接收器
-        registerReceiver(playbackErrorReceiver, IntentFilter("com.example.floatingscreencasting.PLAYBACK_ERROR"))
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            registerReceiver(playbackErrorReceiver, IntentFilter("com.example.floatingscreencasting.PLAYBACK_ERROR"),
+                Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(playbackErrorReceiver, IntentFilter("com.example.floatingscreencasting.PLAYBACK_ERROR"))
+        }
         EventBus.getDefault().register(this)
 
         // 启动进度更新（使用协程）
@@ -206,7 +224,9 @@ class ComposeMainActivity : AppCompatActivity() {
                     onDefaultClick = { restoreDefault() },
                     onCustomClick = { saveCustomConfig() },
                     onDisplayChange = { displayId -> changeDisplay(displayId) },
-                    onContinueWatching = { continueWatching() }
+                    onContinueWatching = { continueWatching() },
+                    onAudioOutputChange = { toggleAudioOutput() },
+                    onScanDevices = { scanPhoneDevices() }
                 )
             }
         }
@@ -233,7 +253,9 @@ class ComposeMainActivity : AppCompatActivity() {
         onDefaultClick: () -> Unit,
         onCustomClick: () -> Unit,
         onDisplayChange: (Int) -> Unit,
-        onContinueWatching: () -> Unit
+        onContinueWatching: () -> Unit,
+        onAudioOutputChange: () -> Unit = {},
+        onScanDevices: () -> Unit = {}
     ) {
         Scaffold(
             topBar = {}  // 空的顶部栏
@@ -275,12 +297,16 @@ class ComposeMainActivity : AppCompatActivity() {
                     duration = uiState.duration,
                     isMuted = uiState.isMuted,
                     audioOutputMode = uiState.audioOutputMode,
+                    connectedPhoneDevice = uiState.connectedPhoneDevice,
+                    phoneDeviceCount = uiState.phoneDeviceCount,
                     onPlayPause = onPlayPause,
                     onStop = onStop,
                     onPrevious = onPrevious,
                     onNext = onNext,
                     onMute = onMute,
-                    onSeek = { onSeek(it.toLong()) }
+                    onSeek = { onSeek(it.toLong()) },
+                    onAudioOutputChange = onAudioOutputChange,
+                    onScanDevices = onScanDevices
                 )
 
                 // 设置卡片
@@ -398,7 +424,71 @@ class ComposeMainActivity : AppCompatActivity() {
         val newMutedState = !uiState.value.isMuted
         _uiState.value = uiState.value.copy(isMuted = newMutedState)
         videoPresentation?.setMuted(newMutedState)
-        EventBus.getDefault().post(MuteEvent(newMutedState))
+    }
+
+    /**
+     * 切换音频输出
+     */
+    private fun toggleAudioOutput() {
+        lifecycleScope.launch {
+            val currentMode = uiState.value.audioOutputMode
+            val newMode = if (currentMode == "speaker") "phone" else "speaker"
+
+            // 切换音频输出模式
+            val success = if (newMode == "phone") {
+                // 切换到手机端
+                audioOutputController.switchOutputMode(
+                    AudioOutputController.OutputMode.PHONE
+                )
+            } else {
+                // 切换到车机扬声器
+                audioOutputController.switchOutputMode(
+                    AudioOutputController.OutputMode.SPEAKER
+                )
+            }
+
+            if (success) {
+                _uiState.value = uiState.value.copy(audioOutputMode = newMode)
+                Toast.makeText(
+                    this@ComposeMainActivity,
+                    if (newMode == "phone") "音频输出已切换到手机端" else "音频输出已切换到车机扬声器",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                Toast.makeText(
+                    this@ComposeMainActivity,
+                    "切换失败，请确保手机设备已连接",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    /**
+     * 扫描手机设备
+     */
+    private fun scanPhoneDevices() {
+        lifecycleScope.launch {
+            Toast.makeText(
+                this@ComposeMainActivity,
+                "正在扫描DLNA设备...",
+                Toast.LENGTH_SHORT
+            ).show()
+
+            // 触发DLNA设备重新发现
+            // DlnaDmcClient会自动定期发现设备，这里只是提示用户
+            delay(2000) // 模拟扫描延迟
+
+            // 更新设备数量（从PhoneDeviceManager获取）
+            val deviceCount = phoneDeviceManager.getDeviceCount()
+            _uiState.value = uiState.value.copy(phoneDeviceCount = deviceCount)
+
+            Toast.makeText(
+                this@ComposeMainActivity,
+                "扫描完成，发现 $deviceCount 个设备",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
     }
 
     private fun seekTo(positionSeconds: Long) {
@@ -671,6 +761,26 @@ class ComposeMainActivity : AppCompatActivity() {
 
     private fun showPresentationOnDisplay(display: Display) {
         try {
+            Log.d("ComposeMainActivity", "开始创建视频窗口，displayId: ${display.displayId}")
+
+            // 检查是否是主屏幕（单屏幕设备）
+            if (display.displayId == Display.DEFAULT_DISPLAY) {
+                // 单屏幕设备，使用Dialog
+                Log.d("ComposeMainActivity", "单屏幕设备，使用SingleScreenVideoDialog")
+                SingleScreenVideoDialog(this).apply {
+                    singleScreenDialog = this
+                    show()
+                    Log.d("ComposeMainActivity", "Dialog显示成功")
+
+                    // 初始静音（视频只播放画面）
+                    setMuted(true)
+                }
+
+                _uiState.value = uiState.value.copy(isWindowVisible = true)
+                Log.d("ComposeMainActivity", "单屏幕视频窗口创建成功")
+                return
+            }
+
             Log.d("ComposeMainActivity", "开始创建VideoPresentation...")
             VideoPresentation(this, display).apply {
                 videoPresentation = this
@@ -692,6 +802,63 @@ class ComposeMainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Log.e("ComposeMainActivity", "创建Presentation失败", e)
         }
+    }
+
+    /**
+     * 初始化音频输出控制器
+     */
+    private fun initializeAudioOutputController() {
+        // 初始化DLNA DMC客户端（用于发现和控制手机设备）
+        dlnaDmcClient = DlnaDmcClient(this)
+
+        // 初始化手机设备管理器
+        phoneDeviceManager = PhoneDeviceManager(this)
+
+        // 初始化音频输出控制器
+        audioOutputController = AudioOutputController(dlnaDmcClient, phoneDeviceManager)
+
+        // 设置静音控制回调
+        audioOutputController.setMuteControlCallback(object : AudioOutputController.MuteControlCallback {
+            override fun setMuted(muted: Boolean) {
+                // 通知VideoPresentation静音/取消静音
+                videoPresentation?.setMuted(muted)
+                Log.d("ComposeMainActivity", "音频输出控制器请求静音: $muted")
+            }
+        })
+
+        // 设置播放状态监听器
+        audioOutputController.setPlaybackStateListener(object : AudioOutputController.PlaybackStateListener {
+            override fun onPlay() {
+                videoPresentation?.play()
+            }
+
+            override fun onPause() {
+                videoPresentation?.pause()
+            }
+
+            override fun onSeek(positionMs: Long) {
+                videoPresentation?.seekTo(positionMs)
+            }
+
+            override fun onStop() {
+                videoPresentation?.stop()
+            }
+        })
+
+        // 启动DLNA DMC客户端（开始发现手机设备）
+        dlnaDmcClient.start()
+
+        // 监听设备列表变化
+        dlnaDmcClient.onDeviceListChanged = { devices ->
+            phoneDeviceManager.updateDevices(devices)
+            _uiState.value = uiState.value.copy(
+                phoneDeviceCount = devices.size,
+                connectedPhoneDevice = phoneDeviceManager.getSelectedDevice()?.friendlyName
+            )
+            Log.d("ComposeMainActivity", "发现 ${devices.size} 个DLNA设备")
+        }
+
+        Log.d("ComposeMainActivity", "音频输出控制器初始化完成")
     }
 
     private fun initializeDlnaService() {
@@ -718,8 +885,9 @@ class ComposeMainActivity : AppCompatActivity() {
                 }
             }
 
-            onPlayMedia = { uri ->
+            onPlayMedia = { uri, headers ->
                 Log.d("ComposeMainActivity", "收到onPlayMedia回调: $uri")
+                Log.d("ComposeMainActivity", "HTTP头: $headers")
                 lifecycleScope.launch(Dispatchers.Main) {
                     try {
                         Log.d("ComposeMainActivity", "videoPresentation是否为null: ${videoPresentation == null}")
@@ -874,6 +1042,12 @@ class ComposeMainActivity : AppCompatActivity() {
             windowHeight = savedSettings.height
             windowAlpha = savedSettings.alpha / 100f
         }
+        singleScreenDialog?.apply {
+            windowX = savedSettings.x
+            windowY = savedSettings.y
+            windowWidth = savedSettings.width
+            windowHeight = savedSettings.height
+        }
     }
 
     private fun saveSettings() {
@@ -954,6 +1128,11 @@ class ComposeMainActivity : AppCompatActivity() {
         displayManager.unregisterDisplayListener(displayListener)
         unregisterReceiver(playbackErrorReceiver)
         EventBus.getDefault().unregister(this)
+
+        // 停止并释放音频输出控制器
+        audioOutputController.release()
+        dlnaDmcClient.stop()
+
         videoPresentation?.dismiss()
     }
 
@@ -964,7 +1143,56 @@ class ComposeMainActivity : AppCompatActivity() {
     }
 
     private fun isPresentationDisplay(display: Display): Boolean {
+        // 如果设备只有一个屏幕，允许使用内置屏幕
+        val displays = displayManager.displays
+        if (displays.size == 1) {
+            return true
+        }
+        // 多屏幕设备，只允许使用Presentation屏幕
         return display.flags and Display.FLAG_PRESENTATION != 0
+    }
+
+    /**
+     * 统一的视频播放控制方法
+     */
+    private fun playVideo(uri: String) {
+        videoPresentation?.playMedia(uri)
+        singleScreenDialog?.playMedia(uri)
+    }
+
+    private fun pauseVideo() {
+        videoPresentation?.pause()
+        singleScreenDialog?.pause()
+    }
+
+    private fun stopVideo() {
+        videoPresentation?.stop()
+        singleScreenDialog?.stop()
+    }
+
+    private fun seekVideo(position: Long) {
+        videoPresentation?.seekTo(position)
+        singleScreenDialog?.seekTo(position)
+    }
+
+    private fun setMuted(muted: Boolean) {
+        videoPresentation?.setMuted(muted)
+        singleScreenDialog?.setMuted(muted)
+    }
+
+    private fun getVideoPlayer(): ExoPlayer? {
+        return videoPresentation?.getExoPlayer() ?: singleScreenDialog?.getExoPlayer()
+    }
+
+    private fun isVideoPlaying(): Boolean {
+        return videoPresentation?.isPlaying() == true || singleScreenDialog?.isPlaying() == true
+    }
+
+    private fun dismissVideoWindow() {
+        videoPresentation?.dismiss()
+        videoPresentation = null
+        singleScreenDialog?.dismiss()
+        singleScreenDialog = null
     }
 
     private fun addressToString(address: ByteArray): String {
@@ -994,7 +1222,9 @@ data class MainUiState(
     val hasContinueWatching: Boolean = false,
     val lastPlayedTitle: String = "",
     val lastPlayedProgress: Int = 0,
-    val audioOutputMode: String = "speaker"
+    val audioOutputMode: String = "speaker",
+    val connectedPhoneDevice: String? = null,
+    val phoneDeviceCount: Int = 0
 )
 
 // DisplayInfo已定义在com.example.floatingscreencasting.ui.composable包中
