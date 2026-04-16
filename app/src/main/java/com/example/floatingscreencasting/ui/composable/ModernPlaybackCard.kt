@@ -91,8 +91,10 @@ fun ModernPlaybackControlCard(
 }
 
 /**
+ * 播放状态指示器
+ */
 @Composable
-private fun StatusIndicator(isPlaying: Boolean, hasContent: Boolean) {
+fun StatusIndicator(isPlaying: Boolean, hasContent: Boolean) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val scale by infiniteTransition.animateFloat(
         initialValue = 1f,

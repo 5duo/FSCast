@@ -88,6 +88,9 @@ dependencies {
     // OkHttp (用于视频缓存)
     implementation(libs.okhttp)
 
+    // Gson
+    implementation(libs.gson)
+
     // ConstraintLayout
     implementation(libs.constraintlayout)
 

@@ -284,14 +284,6 @@ class ComposeMainActivity : AppCompatActivity() {
                     onMute = onMute,
                     onSeek = { onSeek(it.toLong()) }
                 )
-                        } else {
-                            android.util.Log.d("ComposeMainActivity", "启动本地PCM测试")
-                            videoPresentation?.toggleLocalAudioTest(true)
-                            _uiState.value = _uiState.value.copy(localAudioTest = true)
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                )
 
                 // 设置卡片
                 ModernSettingsCard(

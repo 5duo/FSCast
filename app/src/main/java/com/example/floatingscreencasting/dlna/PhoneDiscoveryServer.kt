@@ -34,12 +34,12 @@ class PhoneDiscoveryServer(private val context: Context) {
      * 已发现的手机设备列表
      */
     data class PhoneDevice(
-        val id: String,          // 唯一标识（IP地址）
-        val name: String,        // 设备名称
-        val address: String,     // IP地址
-        val platform: String,    // 平台类型（harmony/android）
-        val lastSeen: Long = System.currentTimeMillis()  // 最后发现时间
-        var selected: Boolean = false  // 是否被选中
+        val id: String,
+        val name: String,
+        val address: String,
+        val platform: String,
+        val lastSeen: Long = System.currentTimeMillis(),
+        var selected: Boolean = false
     )
 
     private val discoveredDevices = mutableMapOf<String, PhoneDevice>()
