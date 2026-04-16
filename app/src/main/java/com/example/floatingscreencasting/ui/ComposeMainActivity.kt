@@ -255,8 +255,6 @@ class ComposeMainActivity : AppCompatActivity() {
                         onContinueWatching = onContinueWatching,
                         modifier = Modifier.fillMaxWidth()
                     )
-
-                    Spacer(modifier = Modifier.height(8.dp))
                 }
 
                 // 悬浮窗控制卡片
@@ -305,8 +303,6 @@ class ComposeMainActivity : AppCompatActivity() {
                     onCustomClick = onCustomClick,
                     modifier = Modifier.fillMaxWidth()
                 )
-
-                Spacer(modifier = Modifier.height(8.dp))
 
                 // 底部信息
                 Text(
