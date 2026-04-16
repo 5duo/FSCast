@@ -42,11 +42,13 @@ fun ModernPlaybackControlCard(
     audioOutputMode: String = "speaker",
     connectedClients: List<StreamClient> = emptyList(),
     selectedClientId: String? = null,
+    localAudioTest: Boolean = false,  // 本地音频测试模式
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onMute: () -> Unit,
+    onToggleLocalAudio: () -> Unit = {},  // 切换本地音频测试
     onSeek: (Float) -> Unit,
     onSelectSpeaker: () -> Unit = {},
     onSelectDevice: (String) -> Unit = {},
@@ -121,11 +123,13 @@ fun ModernPlaybackControlCard(
             ModernPlaybackControls(
                 isPlaying = isPlaying,
                 isMuted = isMuted,
+                localAudioTest = localAudioTest,
                 onPlayPause = onPlayPause,
                 onStop = onStop,
                 onPrevious = onPrevious,
                 onNext = onNext,
-                onMute = onMute
+                onMute = onMute,
+                onToggleLocalAudio = onToggleLocalAudio
             )
         }
     }
@@ -455,11 +459,13 @@ private fun TimeLabel(time: Long, label: String) {
 private fun ModernPlaybackControls(
     isPlaying: Boolean,
     isMuted: Boolean,
+    localAudioTest: Boolean,
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    onMute: () -> Unit
+    onMute: () -> Unit,
+    onToggleLocalAudio: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -513,6 +519,17 @@ private fun ModernPlaybackControls(
             contentDescription = if (isMuted) "取消静音" else "静音",
             size = 50.dp
         )
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        // 本地音频测试按钮
+        ModernControlButton(
+            onClick = onToggleLocalAudio,
+            icon = "🔊🚗",
+            contentDescription = "本地音频测试",
+            size = 50.dp,
+            tint = if (localAudioTest) Success else OnSurfaceVariant
+        )
     }
 }
 
@@ -525,7 +542,8 @@ private fun ModernControlButton(
     onClick: () -> Unit,
     icon: String,
     contentDescription: String?,
-    size: Dp
+    size: Dp,
+    tint: Color = OnSurfaceVariant  // 添加tint参数，默认为灰色
 ) {
     Surface(
         onClick = onClick,
@@ -541,7 +559,7 @@ private fun ModernControlButton(
             Text(
                 text = icon,
                 fontSize = 24.sp,
-                color = OnSurfaceVariant
+                color = tint
             )
         }
     }

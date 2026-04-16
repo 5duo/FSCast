@@ -7,6 +7,16 @@ import android.util.Log
 import kotlinx.coroutines.*
 
 /**
+ * 投屏请求数据类
+ * 保存DLNA投屏的URL和元数据，用于同步到手机端
+ */
+data class CastingRequest(
+    val uri: String,              // 视频URL
+    val metadata: String = "",    // 元数据
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+/**
  * DLNA DMR服务
  * 管理SSDP和HTTP服务器，提供DLNA投屏功能
  */
@@ -29,6 +39,10 @@ class DlnaDmrService(private val context: Context) {
 
     private var isRunning = false
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+    // 保存当前投屏请求，用于同步到手机端
+    @Volatile
+    private var currentCastingRequest: CastingRequest? = null
 
     // 主线程Handler，用于在主线程上访问ExoPlayer
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -227,6 +241,10 @@ class DlnaDmrService(private val context: Context) {
             return
         }
 
+        // 保存投屏请求（用于同步到手机端）
+        currentCastingRequest = CastingRequest(uri = uri)
+        Log.d(TAG, "投屏请求已保存: $uri")
+
         // 提取视频标题（从元数据或URL中）
         val title = extractTitleFromUri(uri)
 
@@ -281,6 +299,19 @@ class DlnaDmrService(private val context: Context) {
             uri.contains("youku") -> "优酷"
             else -> "在线视频"
         }
+    }
+
+    /**
+     * 获取当前投屏请求
+     * 用于同步到手机端
+     */
+    fun getCurrentCastingRequest(): CastingRequest? = currentCastingRequest
+
+    /**
+     * 清除当前投屏请求
+     */
+    fun clearCastingRequest() {
+        currentCastingRequest = null
     }
 
     // 媒体控制回调

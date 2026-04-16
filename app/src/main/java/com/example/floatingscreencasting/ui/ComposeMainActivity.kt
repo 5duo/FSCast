@@ -37,6 +37,7 @@ import com.example.floatingscreencasting.dlna.DlnaDmrService
 import com.example.floatingscreencasting.events.MuteEvent
 import com.example.floatingscreencasting.presentation.VideoPresentation
 import com.example.floatingscreencasting.ui.composable.*
+import com.example.floatingscreencasting.ui.debug.AudioDebugPanel
 import com.example.floatingscreencasting.ui.theme.FloatingScreenCastingTheme
 import com.example.floatingscreencasting.ui.composable.DisplayInfo
 import com.example.floatingscreencasting.history.PlaybackHistoryManager
@@ -286,6 +287,7 @@ class ComposeMainActivity : AppCompatActivity() {
                     audioOutputMode = uiState.audioOutputMode,
                     connectedClients = uiState.connectedClients,
                     selectedClientId = uiState.selectedClientId,
+                    localAudioTest = uiState.localAudioTest,
                     onPlayPause = onPlayPause,
                     onStop = onStop,
                     onPrevious = onPrevious,
@@ -294,6 +296,21 @@ class ComposeMainActivity : AppCompatActivity() {
                     onSeek = { onSeek(it.toLong()) },
                     onSelectSpeaker = onSelectSpeaker,
                     onSelectDevice = onSelectDevice,
+                    onToggleLocalAudio = {
+                        // 切换音频测试状态
+                        android.util.Log.e("ComposeMainActivity", "========== 测试按钮点击: 当前状态=${uiState.localAudioTest} ==========")
+                        android.util.Log.e("ComposeMainActivity", "videoPresentation是否为null: ${videoPresentation == null}")
+
+                        if (uiState.localAudioTest) {
+                            android.util.Log.d("ComposeMainActivity", "停止本地PCM测试")
+                            videoPresentation?.toggleLocalAudioTest(false)
+                            _uiState.value = _uiState.value.copy(localAudioTest = false)
+                        } else {
+                            android.util.Log.d("ComposeMainActivity", "启动本地PCM测试")
+                            videoPresentation?.toggleLocalAudioTest(true)
+                            _uiState.value = _uiState.value.copy(localAudioTest = true)
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -1051,7 +1068,8 @@ data class MainUiState(
     val lastPlayedProgress: Int = 0,
     val audioOutputMode: String = "speaker",
     val connectedClients: List<StreamClient> = emptyList(),
-    val selectedClientId: String? = null
+    val selectedClientId: String? = null,
+    val localAudioTest: Boolean = false  // 本地音频测试模式
 )
 
 /**

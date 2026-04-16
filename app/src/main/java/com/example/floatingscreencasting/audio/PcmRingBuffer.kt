@@ -16,8 +16,9 @@ class PcmRingBuffer(
 ) {
     companion object {
         private const val TAG = "PcmRingBuffer"
-        // 44100 * 2(声道) * 2(16bit) * 0.5(秒) ≈ 88200，取 176400 约 1 秒缓冲
-        private const val DEFAULT_CAPACITY = 176_400
+        // 增大到2秒缓冲，减少数据覆盖频率，提高声音连续性
+        // 44100 * 2(声道) * 2(16bit) * 2(秒) = 352,800字节
+        private const val DEFAULT_CAPACITY = 352_800
     }
 
     private val buffer = ByteArray(capacityBytes)
@@ -36,6 +37,19 @@ class PcmRingBuffer(
     @Volatile
     private var closed = false
 
+    // 可动态调整的参数
+    @Volatile
+    var overflowStrategy: Int = 0  // 0=覆盖旧数据, 1=丢弃新数据（改为覆盖旧数据，避免丢失音频）
+        private set
+
+    /**
+     * 更新溢出策略
+     */
+    fun setOverflowStrategy(strategy: Int) {
+        overflowStrategy = strategy
+        android.util.Log.d(TAG, "溢出策略已更新: $strategy (${if (strategy == 0) "覆盖旧数据" else "丢弃新数据"})")
+    }
+
     /**
      * 从 ByteBuffer 写入 PCM 数据到环形缓冲区。
      * 由 ExoPlayer 音频渲染线程调用。
@@ -49,38 +63,71 @@ class PcmRingBuffer(
         val remaining = src.remaining()
         if (remaining == 0) return 0
 
+        // 先复制到临时数组（避免并发问题）
+        val tempArray = ByteArray(remaining)
+        val srcPos = src.position()
+        src.get(tempArray)
+        src.position(srcPos)
+
+        return write(tempArray)
+    }
+
+    /**
+     * 从字节数组写入 PCM 数据到环形缓冲区。
+     * @param src 数据源字节数组
+     * @return 实际写入的字节数
+     */
+    fun write(src: ByteArray): Int {
+        val remaining = src.size
+        if (remaining == 0) return 0
+
         synchronized(lock) {
             if (closed) return 0
 
             val toWrite = remaining.coerceAtMost(capacity)
-            val srcPos = src.position()
 
-            // 如果数据量超过容量，跳过前面的部分（只保留最新的）
-            val skipBytes = remaining - toWrite
-
+            // 从字节数组写入环形缓冲区
             if (toWrite <= capacity - writePos) {
                 // 一次性写入（不跨越缓冲区末尾）
-                src.position(srcPos + skipBytes)
-                src.get(buffer, writePos, toWrite)
+                System.arraycopy(src, 0, buffer, writePos, toWrite)
             } else {
                 // 分两次写入（跨越缓冲区末尾）
                 val firstPart = capacity - writePos
-                src.position(srcPos + skipBytes)
-                src.get(buffer, writePos, firstPart)
-                src.get(buffer, 0, toWrite - firstPart)
+                System.arraycopy(src, 0, buffer, writePos, firstPart)
+                System.arraycopy(src, firstPart, buffer, 0, toWrite - firstPart)
             }
-
-            // 恢复原始 position
-            src.position(srcPos)
 
             writePos = (writePos + toWrite) % capacity
 
             // 更新可用数据量
             if (toWrite > capacity - availableBytes) {
-                // 缓冲区溢出，丢弃最旧数据
-                val overflow = toWrite - (capacity - availableBytes)
-                readPos = (readPos + overflow) % capacity
-                availableBytes = capacity
+                // 缓冲区溢出，根据overflowStrategy决定处理方式
+                if (overflowStrategy == 0) {
+                    // 策略0：覆盖旧数据（允许覆盖，可能丢失部分旧数据）
+                    availableBytes += toWrite
+                    // 如果超过容量，readPos也需要移动
+                    if (availableBytes > capacity) {
+                        val overflow = availableBytes - capacity
+                        readPos = (readPos + overflow) % capacity
+                        availableBytes = capacity
+                    }
+                } else {
+                    // 策略1：丢弃新数据（默认，保证播放连续性）
+                    val toActuallyWrite = capacity - availableBytes
+                    if (toActuallyWrite > 0) {
+                        if (toActuallyWrite <= capacity - writePos) {
+                            System.arraycopy(src, 0, buffer, writePos, toActuallyWrite)
+                        } else {
+                            val firstPart = capacity - writePos
+                            System.arraycopy(src, 0, buffer, writePos, firstPart)
+                            System.arraycopy(src, firstPart, buffer, 0, toActuallyWrite - firstPart)
+                        }
+                        writePos = (writePos + toActuallyWrite) % capacity
+                        availableBytes = capacity
+                    }
+                    android.util.Log.w(TAG, "缓冲区满，丢弃${toWrite - toActuallyWrite}字节新数据 (策略: 丢弃新数据)")
+                    return toActuallyWrite
+                }
             } else {
                 availableBytes += toWrite
             }
@@ -104,6 +151,8 @@ class PcmRingBuffer(
      */
     fun read(dst: ByteArray, timeoutMs: Long = 100): Int {
         synchronized(lock) {
+            val availableBefore = availableBytes
+
             // 等待数据可用
             if (availableBytes == 0) {
                 if (closed) return -1
@@ -134,6 +183,13 @@ class PcmRingBuffer(
 
             readPos = (readPos + toRead) % capacity
             availableBytes -= toRead
+
+            // 诊断日志：检测是否有数据竞争
+            if (toRead > 0 && availableBytes >= availableBefore - toRead + 1000) {
+                // 读取后availableBytes不应该增加（除非有新数据写入）
+                // 如果增加太多，说明有并发写入问题
+                Log.w(TAG, "PcmRingBuffer.read: 可能的数据竞争 - 读取前=$availableBefore, 读取=$toRead, 读取后=$availableBytes")
+            }
 
             return toRead
         }

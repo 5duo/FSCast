@@ -25,12 +25,19 @@ class AudioStreamManager(private val context: Context) {
 
     enum class AudioOutputMode { SPEAKER, PHONE }
 
-    val pcmRingBuffer = PcmRingBuffer()
+    val pcmRingBuffer = PcmRingBuffer()  // 公开，供VideoPresentation本地PCM测试使用
+    val timestampQueue = TimestampQueue()  // 公开，供时间戳同步使用
 
     private val audioStreamServer = AudioStreamServer(
         pcmRingBuffer = pcmRingBuffer,
+        timestampQueue = timestampQueue,
         commandHandler = { clientId, action, params -> handleCommand(clientId, action, params) },
-        stateProvider = { currentState }
+        stateProvider = { currentState },
+        onFormatChanged = { sampleRate, channels, encoding ->
+            // 更新当前音频格式（供本地PCM测试使用）
+            currentSampleRate = sampleRate
+            currentChannels = channels
+        }
     )
 
     private val audioDiscoveryServer = AudioDiscoveryServer()
@@ -46,6 +53,12 @@ class AudioStreamManager(private val context: Context) {
 
     /** 音频输出模式变化回调（控制车机静音/恢复） */
     var onOutputModeChanged: ((muted: Boolean) -> Unit)? = null
+
+    // 当前音频格式（供本地PCM测试使用）
+    var currentSampleRate: Int = 0
+        private set
+    var currentChannels: Int = 0
+        private set
 
     private var currentState = AudioStreamServer.PlaybackState()
 
@@ -87,6 +100,7 @@ class AudioStreamManager(private val context: Context) {
      */
     fun createRenderersFactory(): DefaultRenderersFactory {
         val ringBuffer = pcmRingBuffer
+        val tsQueue = timestampQueue
         val server = audioStreamServer
 
         return object : DefaultRenderersFactory(context) {
@@ -99,10 +113,11 @@ class AudioStreamManager(private val context: Context) {
                 val defaultSink = super.buildAudioSink(context, enableFloatOutput, enableAudioTrackPlaybackParams)
                     ?: throw IllegalStateException("无法创建 DefaultAudioSink")
 
-                // 包装为 StreamingAudioSink，拦截 PCM 数据
+                // 包装为 StreamingAudioSink，拦截 PCM 数据和时间戳
                 return StreamingAudioSink(
                     delegate = defaultSink,
                     pcmRingBuffer = ringBuffer,
+                    timestampQueue = tsQueue,
                     onFormatChanged = { sampleRate, channelCount, encoding ->
                         Log.d(TAG, "音频格式: ${sampleRate}Hz, ${channelCount}ch, encoding=$encoding")
                         server.sendFormatHeader(sampleRate, channelCount, encoding)
@@ -177,6 +192,18 @@ class AudioStreamManager(private val context: Context) {
      * 服务是否在运行。
      */
     fun isRunning(): Boolean = audioStreamServer.isRunning()
+
+    /**
+     * 更新调试参数（用于实时调整音频参数）
+     *
+     * 注意：bufferSizeMs 和 audioTrackBufferMultiplier 需要重建对象才能生效，
+     * 其他参数可以立即生效。
+     */
+    fun updateDebugParams(params: com.example.floatingscreencasting.ui.debug.AudioDebugParams) {
+        // 更新 PcmRingBuffer 的溢出策略
+        pcmRingBuffer.setOverflowStrategy(params.overflowStrategy)
+        Log.d(TAG, "调试参数已更新: overflowStrategy=${params.overflowStrategy}, readTimeoutMs=${params.readTimeoutMs}, sleepStrategy=${params.sleepStrategy}")
+    }
 
     /**
      * 处理来自手机端的控制命令。

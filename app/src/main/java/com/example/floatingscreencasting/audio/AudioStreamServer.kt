@@ -17,14 +17,16 @@ import java.nio.ByteOrder
  *
  * 功能：
  * - 接受多个手机客户端连接（最多 5 个）
- * - 向选中的设备发送 PCM 音频流
+ * - 向选中的设备发送 PCM 音频流（带时间戳）
  * - 向所有设备广播播放状态
  * - 接收所有设备的控制命令
  */
 class AudioStreamServer(
     private val pcmRingBuffer: PcmRingBuffer,
+    private val timestampQueue: TimestampQueue,
     private val commandHandler: (clientId: String, action: String, params: Map<String, Any>) -> Unit,
-    private val stateProvider: () -> PlaybackState
+    private val stateProvider: () -> PlaybackState,
+    private val onFormatChanged: ((sampleRate: Int, channels: Int, encoding: Int) -> Unit)? = null
 ) {
     companion object {
         private const val TAG = "AudioStreamServer"
@@ -42,6 +44,7 @@ class AudioStreamServer(
         const val FRAME_COMMAND_RESULT: Byte = 0x11
         const val FRAME_OUTPUT_CHANGED: Byte = 0x12
         const val FRAME_CONTROL_COMMAND: Byte = 0x20
+        const val FRAME_BUFFER_STATUS: Byte = 0x21  // 缓冲区状态报告
     }
 
     data class ConnectedClient(
@@ -86,7 +89,11 @@ class AudioStreamServer(
 
     var onClientListChanged: ((clients: List<ConnectedClient>) -> Unit)? = null
 
-    private val readBuffer = ByteArray(8192)
+    // 读取缓冲区：精确匹配音频播放速率
+    // 44.1kHz 立体声 16-bit = 176,400 字节/秒
+    // 每 100ms 发送一次：176,400 / 10 = 17,640 字节/次
+    // 设置为 20KB，稍微多一点以补偿网络延迟
+    private val readBuffer = ByteArray(20480)  // 20KB
 
     private inner class ClientConnection(
         val client: ConnectedClient,
@@ -96,6 +103,14 @@ class AudioStreamServer(
         var receiveJob: Job? = null
         var sendJob: Job? = null
         var isActive = true
+
+        // 远程缓冲区状态（用于流量控制）
+        @Volatile
+        var remoteBufferCurrentSize: Int = 0
+        @Volatile
+        var remoteBufferMaxSize: Int = 176400 * 6  // 默认值，与手机端一致
+        @Volatile
+        var lastBufferStatusTime: Long = 0L
     }
 
     /**
@@ -153,7 +168,7 @@ class AudioStreamServer(
                 } catch (e: Exception) {
                     Log.e(TAG, "心跳/PCM发送异常", e)
                 }
-                delay(50) // 50ms 发送间隔
+                delay(100) // 固定 100ms 间隔，稳定发送
             }
         }
     }
@@ -227,9 +242,11 @@ class AudioStreamServer(
             clients[clientId] = conn
             updateClientList()
 
-            // 如果有当前音频格式，发送给新客户端
-            if (currentSampleRate > 0 && _selectedClientId == clientId) {
+            // 如果有当前音频格式，立即发送给新客户端（无论是否被选中）
+            // 这样新连接的客户端可以立即配置 AudioRenderer，减少连接延迟
+            if (currentSampleRate > 0) {
                 sendFormatHeader(output, currentSampleRate, currentChannels, currentEncoding)
+                Log.i(TAG, "已发送格式头给新客户端: ${conn.client.name}")
             }
 
             // 启动接收循环
@@ -270,6 +287,25 @@ class AudioStreamServer(
                         val json = readJsonFrame(stream)
                         if (json != null) {
                             handleCommand(conn.client.id, json)
+                        }
+                    }
+                    FRAME_BUFFER_STATUS.toInt() -> {
+                        // 读取缓冲区状态：[4B 当前大小] [4B 最大大小]
+                        val sizeBytes = ByteArray(8)
+                        val read = stream.read(sizeBytes)
+                        if (read == 8) {
+                            val currentSize = ByteBuffer.wrap(sizeBytes, 0, 4).order(ByteOrder.BIG_ENDIAN).int
+                            val maxSize = ByteBuffer.wrap(sizeBytes, 4, 4).order(ByteOrder.BIG_ENDIAN).int
+                            conn.remoteBufferCurrentSize = currentSize
+                            conn.remoteBufferMaxSize = maxSize
+                            conn.lastBufferStatusTime = System.currentTimeMillis()
+                            // 日志：每 5 秒记录一次
+                            val now = System.currentTimeMillis()
+                            if (now - lastBufferStatusLogTime > 5000) {
+                                val percentage = if (maxSize > 0) (currentSize * 100 / maxSize) else 0
+                                Log.d(TAG, "缓冲区状态: ${conn.client.name} - $currentSize/$maxSize ($percentage%)")
+                                lastBufferStatusLogTime = now
+                            }
                         }
                     }
                     else -> {
@@ -352,6 +388,9 @@ class AudioStreamServer(
         currentChannels = channels
         currentEncoding = encoding
 
+        // 通知格式变化
+        onFormatChanged?.invoke(sampleRate, channels, encoding)
+
         val selectedId = _selectedClientId ?: return
         val conn = clients[selectedId] ?: return
 
@@ -391,6 +430,7 @@ class AudioStreamServer(
             buf.putInt(encoding)
             output.write(buf.array())
             output.flush()
+            Log.d(TAG, "发送格式头: ${sampleRate}Hz, ${channels}ch, encoding=$encoding")
         }
     }
 
@@ -402,18 +442,68 @@ class AudioStreamServer(
         val available = pcmRingBuffer.available()
         if (available == 0) return
 
-        val toRead = available.coerceAtMost(readBuffer.size)
-        val bytesRead = pcmRingBuffer.read(readBuffer, timeoutMs = 0)
-        if (bytesRead <= 0) return
+        // 根据远程缓冲区动态调整发送量
+        // 44.1kHz 立体声 16-bit = 176,400 字节/秒
+        // 目标：维持 0.5-1.5 秒的远程缓冲（低延迟，快速响应）
+        // AudioRenderer 典型配置：16384 字节/次，约 11Hz 回调 = 180,224 B/s
+        // 因此发送速率需要 > 180,224 B/s，即 > 18,022 字节/100ms
+        val remoteBufferSec = if (conn.remoteBufferMaxSize > 0) conn.remoteBufferCurrentSize / 176400.0 else 0.0
+
+        // 动态调整发送量（确保始终超过 AudioRenderer 消耗速率）：
+        // AudioRenderer 消耗速率约 180,224 B/s，即 18,022 B/100ms
+        // 为确保不underrun，发送速率需要至少 20,000 B/100ms
+        // 缓冲 > 2秒：减少发送（20000，让缓冲自然消耗）
+        // 缓冲 1-2秒：正常发送（21000）
+        // 缓冲 < 1秒：加速发送（22000），快速补充缓冲
+        val targetSend = when {
+            remoteBufferSec > 2.0 -> 20000
+            remoteBufferSec > 1.0 -> 21000
+            else -> 22000
+        }
+
+        val toSend = available.coerceAtMost(targetSend)
+
+        // 使用 20ms 超时等待数据，减少发送不均匀
+        val bytesRead = pcmRingBuffer.read(readBuffer, timeoutMs = 20)
+        if (bytesRead <= 0) {
+            // 数据不足，记录但继续（不跳过发送节奏）
+            val now = System.currentTimeMillis()
+            if (now - lastUnderrunLogTime > 5000) {
+                Log.w(TAG, "PCM缓冲区为空，跳过本次发送 (available=$available)")
+                lastUnderrunLogTime = now
+            }
+            return
+        }
+
+        val actualSend = bytesRead.coerceAtMost(toSend)
+
+        // 读取对应的时间戳
+        val timestamp = timestampQueue.read(actualSend)
 
         try {
             synchronized(conn.output) {
                 conn.output.write(FRAME_PCM_DATA.toInt())
                 val lenBuf = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN)
-                lenBuf.putInt(bytesRead)
+                lenBuf.putInt(actualSend)
                 conn.output.write(lenBuf.array())
-                conn.output.write(readBuffer, 0, bytesRead)
+
+                // 添加 8 字节时间戳（Big Endian）
+                val tsBuf = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN)
+                tsBuf.putLong(timestamp)
+                conn.output.write(tsBuf.array())
+
+                conn.output.write(readBuffer, 0, actualSend)
                 conn.output.flush()
+
+                // 日志：每 5 秒记录一次
+                val now = System.currentTimeMillis()
+                if (now - lastPcmLogTime > 5000) {
+                    val remoteBuffer = conn.remoteBufferCurrentSize
+                    val bufferSec = if (remoteBuffer > 0) remoteBuffer / 176400.0 else 0.0  // 44.1kHz
+                    val targetRate = targetSend * 10  // 目标速率
+                    Log.d(TAG, "PCM发送: ${actualSend}B/target=${targetSend}B, ts=$timestamp, 本地=${available}, 远程缓冲=${String.format("%.2f", bufferSec)}s, 目标速率=${targetRate}B/s")
+                    lastPcmLogTime = now
+                }
             }
         } catch (e: SocketException) {
             Log.w(TAG, "PCM 发送失败，客户端可能已断开: ${conn.client.name}")
@@ -422,6 +512,10 @@ class AudioStreamServer(
             Log.e(TAG, "PCM 发送异常", e)
         }
     }
+
+    private var lastPcmLogTime: Long = 0L
+    private var lastBufferStatusLogTime: Long = 0L
+    private var lastUnderrunLogTime: Long = 0L
 
     private fun broadcastState() {
         val state = stateProvider()
