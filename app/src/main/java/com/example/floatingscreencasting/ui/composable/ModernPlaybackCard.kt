@@ -26,7 +26,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.floatingscreencasting.ui.theme.*
-import com.example.floatingscreencasting.ui.StreamClient
 
 /**
  * 现代化播放控制卡片
@@ -40,22 +39,14 @@ fun ModernPlaybackControlCard(
     duration: Long,
     isMuted: Boolean,
     audioOutputMode: String = "speaker",
-    connectedClients: List<StreamClient> = emptyList(),
-    selectedClientId: String? = null,
-    localAudioTest: Boolean = false,  // 本地音频测试模式
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onMute: () -> Unit,
-    onToggleLocalAudio: () -> Unit = {},  // 切换本地音频测试
     onSeek: (Float) -> Unit,
-    onSelectSpeaker: () -> Unit = {},
-    onSelectDevice: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var showAudioOutputSheet by remember { mutableStateOf(false) }
-
     ModernCard(modifier = modifier) {
         Column {
             // 标题和状态
@@ -70,42 +61,8 @@ fun ModernPlaybackControlCard(
                     color = OnSurface,
                     fontWeight = FontWeight.Bold
                 )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // 播放状态指示器
-                    StatusIndicator(isPlaying = isPlaying, hasContent = duration > 0)
-
-                    // 音频输出按钮
-                    Surface(
-                        onClick = { showAudioOutputSheet = true },
-                        shape = CircleShape,
-                        color = when {
-                            audioOutputMode == "phone" && selectedClientId != null -> Success.copy(alpha = 0.2f)
-                            connectedClients.isNotEmpty() -> Info.copy(alpha = 0.2f)
-                            else -> SurfaceVariant.copy(alpha = 0.5f)
-                        },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                text = when {
-                                    audioOutputMode == "phone" && selectedClientId != null -> "📡✓"
-                                    audioOutputMode == "phone" && selectedClientId == null -> "📡⚠"
-                                    connectedClients.isNotEmpty() -> "📡"
-                                    else -> "📡"
-                                },
-                                fontSize = 14.sp,
-                                color = when {
-                                    audioOutputMode == "phone" && selectedClientId != null -> Success
-                                    connectedClients.isNotEmpty() -> Info
-                                    else -> OnSurfaceVariant
-                                }
-                            )
-                        }
-                    }
-                }
+                // 播放状态指示器
+                StatusIndicator(isPlaying = isPlaying, hasContent = duration > 0)
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -123,223 +80,17 @@ fun ModernPlaybackControlCard(
             ModernPlaybackControls(
                 isPlaying = isPlaying,
                 isMuted = isMuted,
-                localAudioTest = localAudioTest,
                 onPlayPause = onPlayPause,
                 onStop = onStop,
                 onPrevious = onPrevious,
                 onNext = onNext,
-                onMute = onMute,
-                onToggleLocalAudio = onToggleLocalAudio
+                onMute = onMute
             )
-        }
-    }
-
-    // 音频输出选择 BottomSheet
-    if (showAudioOutputSheet) {
-        AudioOutputBottomSheet(
-            audioOutputMode = audioOutputMode,
-            connectedClients = connectedClients,
-            selectedClientId = selectedClientId,
-            onSelectSpeaker = {
-                onSelectSpeaker()
-                showAudioOutputSheet = false
-            },
-            onSelectDevice = { clientId ->
-                onSelectDevice(clientId)
-                showAudioOutputSheet = false
-            },
-            onDismiss = { showAudioOutputSheet = false }
-        )
-    }
-}
-
-/**
- * 音频输出选择 BottomSheet
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun AudioOutputBottomSheet(
-    audioOutputMode: String,
-    connectedClients: List<StreamClient>,
-    selectedClientId: String?,
-    onSelectSpeaker: () -> Unit,
-    onSelectDevice: (String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1E293B),
-        contentColor = OnSurface,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 32.dp)
-        ) {
-            // 标题
-            Text(
-                text = "音频输出",
-                style = MaterialTheme.typography.titleLarge,
-                color = OnSurface,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 20.dp)
-            )
-
-            // 车机扬声器选项
-            AudioOutputOption(
-                icon = "🔈",
-                title = "车机扬声器",
-                subtitle = "音频从车机扬声器播放",
-                isSelected = audioOutputMode == "speaker",
-                onClick = onSelectSpeaker
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // 已连接设备列表
-            if (connectedClients.isNotEmpty()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(1.dp)
-                            .background(SurfaceVariant.copy(alpha = 0.3f))
-                    )
-                    Text(
-                        text = "已连接设备 (${connectedClients.size})",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = OnSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp)
-                    )
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(1.dp)
-                            .background(SurfaceVariant.copy(alpha = 0.3f))
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                connectedClients.forEach { client ->
-                    AudioOutputOption(
-                        icon = "📱",
-                        title = client.name,
-                        subtitle = "${client.address} (${client.platform})",
-                        isSelected = selectedClientId == client.id,
-                        onClick = { onSelectDevice(client.id) }
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-            } else {
-                // 无设备连接提示
-                Spacer(modifier = Modifier.height(8.dp))
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFF334155).copy(alpha = 0.5f)
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = "未发现手机设备",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = OnSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "请确保：\n• 手机已安装 FSCast Remote 应用\n• 手机和车机在同一 WiFi 网络下\n• 手机 App 已打开",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = OnSurfaceVariant.copy(alpha = 0.7f),
-                            textAlign = TextAlign.Start,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                }
-            }
         }
     }
 }
 
 /**
- * 音频输出选项卡片
- */
-@Composable
-private fun AudioOutputOption(
-    icon: String,
-    title: String,
-    subtitle: String,
-    isSelected: Boolean,
-    onClick: () -> Unit
-) {
-    val bgColor = if (isSelected) {
-        Primary.copy(alpha = 0.15f)
-    } else {
-        Color(0xFF334155).copy(alpha = 0.5f)
-    }
-
-    val borderColor = if (isSelected) {
-        Primary.copy(alpha = 0.5f)
-    } else {
-        Color.Transparent
-    }
-
-    Card(
-        colors = CardDefaults.cardColors(containerColor = bgColor),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .border(1.dp, borderColor, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = icon,
-                fontSize = 24.sp
-            )
-            Spacer(modifier = Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = OnSurface,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OnSurfaceVariant
-                )
-            }
-            if (isSelected) {
-                Text(
-                    text = "✓",
-                    fontSize = 20.sp,
-                    color = Primary,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
-    }
-}
-
-/**
- * 状态指示器
- */
 @Composable
 private fun StatusIndicator(isPlaying: Boolean, hasContent: Boolean) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -459,13 +210,11 @@ private fun TimeLabel(time: Long, label: String) {
 private fun ModernPlaybackControls(
     isPlaying: Boolean,
     isMuted: Boolean,
-    localAudioTest: Boolean,
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    onMute: () -> Unit,
-    onToggleLocalAudio: () -> Unit
+    onMute: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -518,17 +267,6 @@ private fun ModernPlaybackControls(
             icon = if (isMuted) "🔇" else "🔊",
             contentDescription = if (isMuted) "取消静音" else "静音",
             size = 50.dp
-        )
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        // 本地音频测试按钮
-        ModernControlButton(
-            onClick = onToggleLocalAudio,
-            icon = "🔊🚗",
-            contentDescription = "本地音频测试",
-            size = 50.dp,
-            tint = if (localAudioTest) Success else OnSurfaceVariant
         )
     }
 }

@@ -41,21 +41,11 @@ class VideoPresentation(
     // 音频路由管理器
     private var audioRouteManager: com.example.floatingscreencasting.audio.AudioRouteManager? = null
 
-    // 音频流管理器（由 ComposeMainActivity 注入）
-    var audioStreamManager: com.example.floatingscreencasting.audio.AudioStreamManager? = null
-
     // 同步服务器（用于与手机端同步播放状态）
     private var syncServer: com.example.floatingscreencasting.dlna.SyncServer? = null
 
     // 播放历史管理器
     private val historyManager: PlaybackHistoryManager = PlaybackHistoryManager.getInstance(outerContext)
-
-    // 本地PCM测试播放器
-    private var localAudioTestThread: Thread? = null
-    private var localAudioTrack: android.media.AudioTrack? = null
-    private var isLocalAudioTestRunning = false
-    private var localAudioSampleRate: Int = 44100
-    private var localAudioChannels: Int = 2
 
     // 静音状态
     private var isMuted = true
@@ -289,13 +279,6 @@ class VideoPresentation(
         val playerBuilder = ExoPlayer.Builder(outerContext)
             .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(audioAttributes, true)  // true = handleAudioFocus
-
-        // 注入自定义 AudioSink 以拦截 PCM 音频数据
-        val streamManager = audioStreamManager
-        if (streamManager != null) {
-            playerBuilder.setRenderersFactory(streamManager.createRenderersFactory())
-            android.util.Log.d("VideoPresentation", "已注入StreamingAudioSink用于音频流传输")
-        }
 
         exoPlayer = playerBuilder.build()
             .apply {
@@ -537,13 +520,6 @@ class VideoPresentation(
             .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(audioAttributes, true)  // true = handleAudioFocus
 
-        // 注入自定义 AudioSink 以拦截 PCM 音频数据
-        val streamManager = audioStreamManager
-        if (streamManager != null) {
-            playerBuilder.setRenderersFactory(streamManager.createRenderersFactory())
-            android.util.Log.d("VideoPresentation", "已注入StreamingAudioSink用于音频流传输")
-        }
-
         exoPlayer = playerBuilder.build()
             .apply {
                 // 根据静音状态设置音量
@@ -671,10 +647,6 @@ class VideoPresentation(
      */
     fun play() {
         android.util.Log.d("VideoPresentation", "play() 调用 - isPlaying: ${isPlaying()}")
-        // 恢复本地PCM测试播放（如果有）
-        if (isLocalAudioTestRunning && localAudioTrack != null) {
-            localAudioTrack?.play()
-        }
         exoPlayer?.play()
         android.util.Log.d("VideoPresentation", "play() 完成 - isPlaying: ${isPlaying()}")
     }
@@ -684,10 +656,6 @@ class VideoPresentation(
      */
     fun pause() {
         android.util.Log.d("VideoPresentation", "pause() 调用 - isPlaying: ${isPlaying()}")
-        // 先暂停本地PCM测试（如果有），避免咔哒音
-        if (isLocalAudioTestRunning && localAudioTrack != null) {
-            localAudioTrack?.pause()
-        }
         exoPlayer?.pause()
         android.util.Log.d("VideoPresentation", "pause() 完成 - isPlaying: ${isPlaying()}")
     }
@@ -939,199 +907,4 @@ class VideoPresentation(
         return historyManager.hasContinueWatching()
     }
 
-    /**
-     * 切换本地PCM测试播放
-     * @param start true=开始测试，false=停止测试
-     */
-    fun toggleLocalAudioTest(start: Boolean) {
-        android.util.Log.e("VideoPresentation", "========== toggleLocalAudioTest调用: start=$start, isRunning=$isLocalAudioTestRunning ==========")
-
-        if (start) {
-            if (isLocalAudioTestRunning) {
-                android.util.Log.d("VideoPresentation", "本地PCM测试已在运行")
-                return
-            }
-            android.util.Log.d("VideoPresentation", "开始启动本地PCM测试...")
-            startLocalAudioTest()
-        } else {
-            if (!isLocalAudioTestRunning) {
-                android.util.Log.d("VideoPresentation", "本地PCM测试未运行")
-                return
-            }
-            android.util.Log.d("VideoPresentation", "停止本地PCM测试...")
-            stopLocalAudioTest()
-        }
-    }
-
-    /**
-     * 开始本地PCM测试播放
-     *
-     * 优化策略：持续写入数据，直到AudioTrack开始播放
-     */
-    private fun startLocalAudioTest() {
-        val ringBuffer = audioStreamManager?.pcmRingBuffer
-        if (ringBuffer == null) {
-            android.util.Log.e("VideoPresentation", "PcmRingBuffer未初始化")
-            return
-        }
-
-        // 从audioStreamManager获取当前音频格式
-        localAudioSampleRate = audioStreamManager?.currentSampleRate ?: 44100
-        localAudioChannels = audioStreamManager?.currentChannels ?: 2
-
-        android.util.Log.d("VideoPresentation", "开始本地PCM测试: ${localAudioSampleRate}Hz, ${localAudioChannels}ch")
-
-        // 计算AudioTrack参数
-        val channelConfig = if (localAudioChannels == 2) {
-            android.media.AudioFormat.CHANNEL_OUT_STEREO
-        } else {
-            android.media.AudioFormat.CHANNEL_OUT_MONO
-        }
-        val audioFormat = android.media.AudioFormat.ENCODING_PCM_16BIT
-        val minBufferSize = android.media.AudioTrack.getMinBufferSize(
-            localAudioSampleRate,
-            channelConfig,
-            audioFormat
-        )
-
-        // AudioTrack缓冲大小：使用较大的缓冲
-        val bufferSize = minBufferSize * 4
-
-        android.util.Log.d("VideoPresentation", "AudioTrack缓冲: min=$minBufferSize, actual=$bufferSize")
-
-        // 创建AudioTrack
-        localAudioTrack = android.media.AudioTrack(
-            android.media.AudioManager.STREAM_MUSIC,
-            localAudioSampleRate,
-            channelConfig,
-            audioFormat,
-            bufferSize,
-            android.media.AudioTrack.MODE_STREAM
-        )
-
-        isLocalAudioTestRunning = true
-        localAudioTrack?.play()
-        // 设置音量为最大
-        localAudioTrack?.setVolume(1.0f)
-        android.util.Log.d("VideoPresentation", "AudioTrack已启动，音量=1.0")
-
-        // 读取缓冲区：使用更大的块确保数据连续
-        val readChunkSize = 16384  // 每次读取16KB，确保足够的数据
-        val readBuffer = ByteArray(readChunkSize)
-        val bytesPerMs = localAudioSampleRate * localAudioChannels * 2 / 1000
-
-        localAudioTestThread = Thread {
-            android.util.Log.d("VideoPresentation", "本地PCM测试线程启动")
-
-            // 等待初始缓冲（100ms）
-            val initialBufferMs = 100
-            val initialBufferBytes = (initialBufferMs * bytesPerMs).toInt()
-            android.util.Log.d("VideoPresentation", "等待初始缓冲: ${initialBufferMs}ms = ${initialBufferBytes}字节")
-
-            var waitStart = System.currentTimeMillis()
-            while (ringBuffer.available() < initialBufferBytes && isLocalAudioTestRunning) {
-                Thread.sleep(10)
-                if (System.currentTimeMillis() - waitStart > 5000) {
-                    android.util.Log.w("VideoPresentation", "初始缓冲超时，当前可用: ${ringBuffer.available()}")
-                    break
-                }
-            }
-
-            android.util.Log.d("VideoPresentation", "初始缓冲完成: ${ringBuffer.available()}字节")
-
-            var totalWritten = 0L
-            var lastLogTime = System.currentTimeMillis()
-            var audioTrackStarted = false
-
-            // 激进策略：使用小块频繁写入，消除抽帧
-            val chunkSize = 2048  // 2KB块，更频繁写入
-            val chunkBuffer = ByteArray(chunkSize)
-            var bufferPosition = 0
-
-            while (isLocalAudioTestRunning) {
-                try {
-                    // 非阻塞读取
-                    val bytesRead = ringBuffer.read(readBuffer, 0)  // 0ms超时
-
-                    if (bytesRead > 0) {
-                        // 将读取的数据复制到chunk缓冲区
-                        var readOffset = 0
-                        while (readOffset < bytesRead) {
-                            val remainingInChunk = chunkSize - bufferPosition
-                            val remainingToRead = bytesRead - readOffset
-                            val toCopy = minOf(remainingInChunk, remainingToRead)
-
-                            if (toCopy > 0) {
-                                System.arraycopy(readBuffer, readOffset, chunkBuffer, bufferPosition, toCopy)
-                                bufferPosition += toCopy
-                                readOffset += toCopy
-                            }
-
-                            // 当chunk满时，立即写入AudioTrack
-                            if (bufferPosition >= chunkSize) {
-                                val written = localAudioTrack?.write(chunkBuffer, 0, chunkSize) ?: 0
-                                totalWritten += written
-                                bufferPosition = 0
-
-                                // 检查AudioTrack是否开始播放
-                                if (!audioTrackStarted) {
-                                    val currentPosition = localAudioTrack?.playbackHeadPosition ?: 0
-                                    if (currentPosition > 0) {
-                                        audioTrackStarted = true
-                                        android.util.Log.d("VideoPresentation", "AudioTrack开始播放！")
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        // 无数据，极短暂休眠
-                        Thread.sleep(1)
-                    }
-
-                    // 每5秒记录一次状态
-                    val now = System.currentTimeMillis()
-                    if (now - lastLogTime > 5000) {
-                        val currentPosition = localAudioTrack?.playbackHeadPosition ?: 0
-                        val bufferUsage = ringBuffer.available() / 176400.0
-                        val playedMs = currentPosition * localAudioChannels * 2 / bytesPerMs
-                        android.util.Log.d("VideoPresentation", "本地PCM测试: PcmRingBuffer=${String.format("%.2f", bufferUsage)}s, 已播放=${playedMs}ms, 已写入=${totalWritten / bytesPerMs}ms")
-                        lastLogTime = now
-                    }
-
-                } catch (e: InterruptedException) {
-                    android.util.Log.d("VideoPresentation", "本地PCM测试线程被中断")
-                    break
-                } catch (e: Exception) {
-                    android.util.Log.e("VideoPresentation", "本地PCM测试异常", e)
-                    break
-                }
-            }
-
-            android.util.Log.d("VideoPresentation", "本地PCM测试线程结束")
-        }.apply {
-            name = "LocalAudioTest"
-            start()
-        }
-    }
-
-    /**
-     * 停止本地PCM测试播放
-     */
-    private fun stopLocalAudioTest() {
-        android.util.Log.d("VideoPresentation", "停止本地PCM测试")
-        isLocalAudioTestRunning = false
-
-        localAudioTestThread?.interrupt()
-        localAudioTestThread?.join(1000)
-        localAudioTestThread = null
-
-        localAudioTrack?.let {
-            it.pause()
-            it.flush()
-            it.release()
-        }
-        localAudioTrack = null
-
-        android.util.Log.d("VideoPresentation", "本地PCM测试已停止")
-    }
 }
