@@ -242,7 +242,7 @@ struct Index {
 
   build() {
     Scroll() {
-      Column() {
+      Column({ space: 12 }) {
         // 标题栏
         this.TitleBar()
 
@@ -305,7 +305,6 @@ struct Index {
         .fontWeight(FontWeight.Medium)
         .fontColor('#F1F5F9')
         .width('100%')
-        .margin({ bottom: 12 })
 
       if (this.dlnaUri.length > 0) {
         // 正在播放
@@ -359,7 +358,6 @@ struct Index {
         .fontWeight(FontWeight.Medium)
         .fontColor('#F1F5F9')
         .width('100%')
-        .margin({ bottom: 12 })
 
       Row() {
         // 仅音频模式
@@ -533,7 +531,6 @@ struct Index {
         .fontWeight(FontWeight.Medium)
         .fontColor('#F1F5F9')
         .width('100%')
-        .margin({ bottom: 12 })
 
       Row() {
         Text('🔗')
@@ -564,7 +561,6 @@ struct Index {
         .fontWeight(FontWeight.Medium)
         .fontColor('#F1F5F9')
         .width('100%')
-        .margin({ bottom: 12 })
 
       Row() {
         Text('SSDP:')
