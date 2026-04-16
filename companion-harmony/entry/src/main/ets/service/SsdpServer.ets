@@ -14,7 +14,7 @@ export class SsdpServer {
   private static readonly SSDP_ADDRESS = "239.255.255.250"
   private static readonly SSDP_PORT = 1900
 
-  private udpSocket: socket.UDPSocket | null = null
+  private multicastSocket: socket.MulticastSocket | null = null
   private isRunning: boolean = false
   private notifyTimer: number = -1
 
@@ -30,17 +30,26 @@ export class SsdpServer {
     try {
       this.isRunning = true
 
-      // 创建UDP套接字
-      this.udpSocket = socket.constructUDPSocketInstance()
+      // 创建多播套接字
+      this.multicastSocket = socket.constructMulticastSocketInstance()
 
       // 绑定到本地端口
       let localAddr: socket.NetAddress = {
         address: "0.0.0.0",
-        port: SsdpServer.SSDP_PORT
+        port: SsdpServer.SSDP_PORT,
+        family: 1
       }
-      await this.udpSocket.bind(localAddr)
+      await this.multicastSocket.bind(localAddr)
 
-      hilog.info(DOMAIN, TAG, 'SSDP服务启动成功（简化模式，不支持多播）')
+      // 加入多播组
+      let multicastAddr: socket.NetAddress = {
+        address: SsdpServer.SSDP_ADDRESS,
+        port: SsdpServer.SSDP_PORT,
+        family: 1
+      }
+      await this.multicastSocket.addMembership(multicastAddr)
+
+      hilog.info(DOMAIN, TAG, 'SSDP服务启动成功，已加入多播组')
 
       // 启动监听
       this.listenForMSearch()
@@ -58,11 +67,11 @@ export class SsdpServer {
    * 监听M-SEARCH请求
    */
   private listenForMSearch(): void {
-    if (!this.udpSocket) {
+    if (!this.multicastSocket) {
       return
     }
 
-    this.udpSocket.on('message', (value: socket.SocketMessageInfo) => {
+    this.multicastSocket.on('message', (value: socket.SocketMessageInfo) => {
       if (!this.isRunning) {
         return
       }
@@ -110,7 +119,7 @@ export class SsdpServer {
    * 发送NOTIFY消息
    */
   private async sendNotify(): Promise<void> {
-    if (!this.udpSocket) {
+    if (!this.multicastSocket) {
       return
     }
 
@@ -135,7 +144,7 @@ USN: uuid:${deviceUuid}::urn:schemas-upnp-org:device:MediaRenderer:1
           port: SsdpServer.SSDP_PORT
         }
       }
-      await this.udpSocket.send(sendOptions)
+      await this.multicastSocket.send(sendOptions)
 
       hilog.debug(DOMAIN, TAG, '已发送NOTIFY消息')
     } catch (error) {
@@ -147,7 +156,7 @@ USN: uuid:${deviceUuid}::urn:schemas-upnp-org:device:MediaRenderer:1
    * 发送M-SEARCH响应
    */
   private async sendMSearchResponse(address: string): Promise<void> {
-    if (!this.udpSocket) {
+    if (!this.multicastSocket) {
       return
     }
 
@@ -171,7 +180,7 @@ USN: uuid:${deviceUuid}::urn:schemas-upnp-org:device:MediaRenderer:1
           port: SsdpServer.SSDP_PORT
         }
       }
-      await this.udpSocket.send(sendOptions)
+      await this.multicastSocket.send(sendOptions)
 
       hilog.info(DOMAIN, TAG, `已发送M-SEARCH响应到: ${address}`)
     } catch (error) {
@@ -192,14 +201,22 @@ USN: uuid:${deviceUuid}::urn:schemas-upnp-org:device:MediaRenderer:1
       this.notifyTimer = -1
     }
 
-    if (this.udpSocket) {
+    if (this.multicastSocket) {
       try {
-        this.udpSocket.off('message')
-        await this.udpSocket.close()
+        // 离开多播组
+        let multicastAddr: socket.NetAddress = {
+          address: SsdpServer.SSDP_ADDRESS,
+          port: SsdpServer.SSDP_PORT,
+          family: 1
+        }
+        await this.multicastSocket.dropMembership(multicastAddr)
+
+        this.multicastSocket.off('message')
+        await this.multicastSocket.close()
       } catch (error) {
-        hilog.error(DOMAIN, TAG, `关闭UDP socket失败: ${JSON.stringify(error)}`)
+        hilog.error(DOMAIN, TAG, `关闭多播socket失败: ${JSON.stringify(error)}`)
       }
-      this.udpSocket = null
+      this.multicastSocket = null
     }
 
     hilog.info(DOMAIN, TAG, 'SSDP服务已停止')
