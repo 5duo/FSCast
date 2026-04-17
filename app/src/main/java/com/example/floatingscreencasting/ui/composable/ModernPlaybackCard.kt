@@ -158,7 +158,7 @@ private fun AudioOutputSelector(
 
         Spacer(modifier = Modifier.weight(1f))
 
-        // 中间：设备状态
+        // 中间：设备状态（仅手机模式显示）
         if (currentMode == "phone") {
             if (connectedDevice != null) {
                 Row(
@@ -181,57 +181,53 @@ private fun AudioOutputSelector(
                     )
                 }
             } else {
-                Text(
-                    text = "未连接",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFFF59E0B)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        // 右侧：切换按钮或扫描按钮
-        if (currentMode == "phone" && connectedDevice == null) {
-            // 显示扫描按钮
-            Surface(
-                onClick = onScanDevices,
-                shape = RoundedCornerShape(8.dp),
-                color = Color(0xFF6366F1).copy(alpha = 0.1f)
-            ) {
-                Text(
-                    text = "扫描设备",
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF6366F1),
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-        } else {
-            // 显示切换按钮
-            Surface(
-                onClick = onModeChange,
-                shape = RoundedCornerShape(8.dp),
-                color = SurfaceVariant
-            ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Text(
-                        text = if (currentMode == "phone") "切换到车机" else "切换到手机",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = OnSurface,
-                        fontWeight = FontWeight.SemiBold
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(
+                                color = Color(0xFFF59E0B),
+                                shape = CircleShape
+                            )
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "→",
+                        text = "未连接",
                         style = MaterialTheme.typography.bodySmall,
-                        color = OnSurfaceVariant
+                        color = Color(0xFFF59E0B)
                     )
                 }
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+        }
+
+        // 右侧：切换按钮
+        Surface(
+            onClick = onModeChange,
+            shape = RoundedCornerShape(8.dp),
+            color = SurfaceVariant
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = if (currentMode == "phone") "切换到车机" else "切换到手机",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurface,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "→",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurfaceVariant
+                )
             }
         }
     }

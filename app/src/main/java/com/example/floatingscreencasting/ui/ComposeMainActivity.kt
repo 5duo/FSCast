@@ -74,6 +74,7 @@ class ComposeMainActivity : AppCompatActivity() {
     private lateinit var audioOutputController: AudioOutputController
     private lateinit var dlnaDmcClient: DlnaDmcClient
     private lateinit var phoneDeviceManager: PhoneDeviceManager
+    private lateinit var webSocketServer: com.example.floatingscreencasting.websocket.CarWebSocketServer
 
     // 驾驶屏固定Display ID 2
     private val drivingDisplayId = 2
@@ -327,6 +328,7 @@ class ComposeMainActivity : AppCompatActivity() {
                     onMaximizeClick = onMaximizeClick,
                     onDefaultClick = onDefaultClick,
                     onCustomClick = onCustomClick,
+                    onRestartWebSocket = { restartWebSocketServer() },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -430,37 +432,65 @@ class ComposeMainActivity : AppCompatActivity() {
      * 切换音频输出
      */
     private fun toggleAudioOutput() {
+        Log.i("ComposeMainActivity", "========================================")
+        Log.i("ComposeMainActivity", "toggleAudioOutput: 当前模式=${uiState.value.audioOutputMode}")
         lifecycleScope.launch {
             val currentMode = uiState.value.audioOutputMode
             val newMode = if (currentMode == "speaker") "phone" else "speaker"
 
+            Log.i("ComposeMainActivity", "切换音频输出: $currentMode -> $newMode")
+
             // 切换音频输出模式
             val success = if (newMode == "phone") {
                 // 切换到手机端
+                Log.i("ComposeMainActivity", "调用switchOutputMode(PHONE)")
+                // 检查当前视频URI是否已设置
+                val currentUri = audioOutputController.getCurrentVideoUri()
+                Log.i("ComposeMainActivity", "当前视频URI: ${currentUri.take(50)}..., 长度: ${currentUri.length}")
+
+                if (currentUri.isEmpty()) {
+                    Log.e("ComposeMainActivity", "错误：没有视频URI，请先投屏视频")
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(
+                            this@ComposeMainActivity,
+                            "切换失败：请先投屏视频到车机",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    return@launch
+                }
+
                 audioOutputController.switchOutputMode(
                     AudioOutputController.OutputMode.PHONE
                 )
             } else {
                 // 切换到车机扬声器
+                Log.i("ComposeMainActivity", "调用switchOutputMode(SPEAKER)")
                 audioOutputController.switchOutputMode(
                     AudioOutputController.OutputMode.SPEAKER
                 )
             }
 
+            Log.i("ComposeMainActivity", "切换结果: $success")
             if (success) {
                 _uiState.value = uiState.value.copy(audioOutputMode = newMode)
-                Toast.makeText(
-                    this@ComposeMainActivity,
-                    if (newMode == "phone") "音频输出已切换到手机端" else "音频输出已切换到车机扬声器",
-                    Toast.LENGTH_SHORT
-                ).show()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        this@ComposeMainActivity,
+                        if (newMode == "phone") "音频输出已切换到手机端" else "音频输出已切换到车机扬声器",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             } else {
-                Toast.makeText(
-                    this@ComposeMainActivity,
-                    "切换失败，请确保手机设备已连接",
-                    Toast.LENGTH_SHORT
-                ).show()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        this@ComposeMainActivity,
+                        "切换失败，请查看日志了解详情",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
+            Log.i("ComposeMainActivity", "========================================")
         }
     }
 
@@ -488,6 +518,142 @@ class ComposeMainActivity : AppCompatActivity() {
                 "扫描完成，发现 $deviceCount 个设备",
                 Toast.LENGTH_SHORT
             ).show()
+        }
+    }
+
+    /**
+     * 启动WebSocket服务器
+     */
+    private fun startWebSocketServer() {
+        try {
+            Log.i("ComposeMainActivity", "正在启动WebSocket服务器，监听端口9999...")
+            webSocketServer.start()
+            Log.i("ComposeMainActivity", "WebSocket服务器已启动，监听端口9999")
+            Log.i("ComposeMainActivity", "WebSocket服务器绑定地址: ${webSocketServer.address}")
+        } catch (e: Exception) {
+            Log.e("ComposeMainActivity", "WebSocket服务器启动失败", e)
+            throw e
+        }
+    }
+
+    /**
+     * 启动WebSocket服务器监控线程
+     * 每5秒检查一次WebSocket服务器状态，如果停止了就自动重启
+     */
+    private fun startWebSocketMonitor() {
+        val monitorJob = lifecycleScope.launch(Dispatchers.IO) {
+            while (true) { // 无限循环监控
+                try {
+                    // 检查WebSocket服务器是否在运行
+                    val isRunning = try {
+                        webSocketServer.isRunning
+                    } catch (e: Exception) {
+                        false
+                    }
+
+                    if (!isRunning) {
+                        Log.w("ComposeMainActivity", "WebSocket服务器已停止，尝试重新启动...")
+                        try {
+                            startWebSocketServer()
+                            Log.i("ComposeMainActivity", "WebSocket服务器自动重启成功")
+
+                            // 重新设置回调
+                            setupWebSocketCallbacks()
+                        } catch (e: Exception) {
+                            Log.e("ComposeMainActivity", "WebSocket服务器自动重启失败", e)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("ComposeMainActivity", "WebSocket监控检查失败", e)
+                }
+
+                // 每5秒检查一次
+                delay(5000)
+            }
+        }
+        Log.i("ComposeMainActivity", "WebSocket监控线程已启动")
+    }
+
+    /**
+     * 设置WebSocket回调
+     */
+    private fun setupWebSocketCallbacks() {
+        webSocketServer.onClientConnected = { clientId ->
+            Log.i("ComposeMainActivity", "手机端已连接: $clientId")
+            lifecycleScope.launch(Dispatchers.Main) {
+                Toast.makeText(this@ComposeMainActivity, "FSCast Remote已连接", Toast.LENGTH_SHORT).show()
+                _uiState.value = uiState.value.copy(
+                    connectedPhoneDevice = "FSCast Remote",
+                    phoneDeviceCount = 1
+                )
+            }
+        }
+
+        webSocketServer.onClientDisconnected = { clientId ->
+            Log.i("ComposeMainActivity", "手机端已断开: $clientId")
+            lifecycleScope.launch(Dispatchers.Main) {
+                Toast.makeText(this@ComposeMainActivity, "FSCast Remote已断开", Toast.LENGTH_SHORT).show()
+                _uiState.value = uiState.value.copy(
+                    connectedPhoneDevice = null,
+                    phoneDeviceCount = 0
+                )
+            }
+        }
+    }
+
+    /**
+     * 重启WebSocket服务器
+     */
+    private fun restartWebSocketServer() {
+        // 先在主线程显示Toast
+        lifecycleScope.launch(Dispatchers.Main) {
+            Toast.makeText(
+                this@ComposeMainActivity,
+                "正在重启WebSocket服务器...",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // 停止现有的WebSocket服务器
+                if (::webSocketServer.isInitialized) {
+                    Log.i("ComposeMainActivity", "停止现有的WebSocket服务器")
+                    webSocketServer.stop()
+                    delay(1000) // 等待服务器完全停止
+                }
+
+                // 创建新的WebSocket服务器实例
+                webSocketServer = com.example.floatingscreencasting.websocket.CarWebSocketServer(9999)
+
+                // 启动WebSocket服务器
+                startWebSocketServer()
+
+                // 重新设置回调
+                setupWebSocketCallbacks()
+
+                // 更新AudioOutputController的WebSocket服务器引用
+                audioOutputController = AudioOutputController(dlnaDmcClient, phoneDeviceManager, webSocketServer)
+
+                // 在主线程显示成功消息
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        this@ComposeMainActivity,
+                        "WebSocket服务器重启成功",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+
+            } catch (e: Exception) {
+                Log.e("ComposeMainActivity", "重启WebSocket服务器失败", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        this@ComposeMainActivity,
+                        "重启失败: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
         }
     }
 
@@ -814,8 +980,20 @@ class ComposeMainActivity : AppCompatActivity() {
         // 初始化手机设备管理器
         phoneDeviceManager = PhoneDeviceManager(this)
 
-        // 初始化音频输出控制器
-        audioOutputController = AudioOutputController(dlnaDmcClient, phoneDeviceManager)
+        // 初始化WebSocket服务器（使用端口9999）
+        // 明确绑定到IPv4地址 0.0.0.0
+        webSocketServer = com.example.floatingscreencasting.websocket.CarWebSocketServer(9999)
+
+        // 立即启动WebSocket服务器
+        lifecycleScope.launch(Dispatchers.IO) {
+            startWebSocketServer()
+
+            // 启动WebSocket监控线程，自动重启
+            startWebSocketMonitor()
+        }
+
+        // 初始化音频输出控制器（传入WebSocket服务器）
+        audioOutputController = AudioOutputController(dlnaDmcClient, phoneDeviceManager, webSocketServer)
 
         // 设置静音控制回调
         audioOutputController.setMuteControlCallback(object : AudioOutputController.MuteControlCallback {
@@ -843,9 +1021,41 @@ class ComposeMainActivity : AppCompatActivity() {
             override fun onStop() {
                 videoPresentation?.stop()
             }
+
+            override fun getCurrentPosition(): Long {
+                val position = videoPresentation?.getExoPlayer()?.currentPosition ?: 0L
+                Log.d("ComposeMainActivity", "getCurrentPosition调用: videoPresentation=${videoPresentation != null}, exoPlayer=${videoPresentation?.getExoPlayer() != null}, position=$position")
+                return position
+            }
         })
 
         // 启动DLNA DMC客户端（开始发现手机设备）
+        dlnaDmcClient.start()
+
+        // 监听WebSocket连接状态
+        webSocketServer.onClientConnected = { clientId ->
+            Log.i("ComposeMainActivity", "手机端已连接: $clientId")
+            lifecycleScope.launch {
+                Toast.makeText(this@ComposeMainActivity, "FSCast Remote已连接", Toast.LENGTH_SHORT).show()
+                // 更新UI状态，显示已连接设备
+                _uiState.value = uiState.value.copy(
+                    connectedPhoneDevice = "FSCast Remote",
+                    phoneDeviceCount = 1
+                )
+            }
+        }
+
+        webSocketServer.onClientDisconnected = { clientId ->
+            Log.i("ComposeMainActivity", "手机端已断开: $clientId")
+            lifecycleScope.launch {
+                Toast.makeText(this@ComposeMainActivity, "FSCast Remote已断开", Toast.LENGTH_SHORT).show()
+                // 更新UI状态，清除连接设备
+                _uiState.value = uiState.value.copy(
+                    connectedPhoneDevice = null,
+                    phoneDeviceCount = 0
+                )
+            }
+        }
         dlnaDmcClient.start()
 
         // 监听设备列表变化
@@ -888,6 +1098,8 @@ class ComposeMainActivity : AppCompatActivity() {
             onPlayMedia = { uri, headers ->
                 Log.d("ComposeMainActivity", "收到onPlayMedia回调: $uri")
                 Log.d("ComposeMainActivity", "HTTP头: $headers")
+                // 保存视频URI到AudioOutputController，以便后续切换音频输出时使用
+                audioOutputController.setCurrentVideoUri(uri, headers)
                 lifecycleScope.launch(Dispatchers.Main) {
                     try {
                         Log.d("ComposeMainActivity", "videoPresentation是否为null: ${videoPresentation == null}")
@@ -1089,6 +1301,7 @@ class ComposeMainActivity : AppCompatActivity() {
                                 currentPosition = currentPosition,
                                 duration = duration
                             )
+                            // 注意：进度同步由AudioOutputController内部的定时器自动处理，不需要在这里调用
                         }
                     }
                 } catch (e: Exception) {
@@ -1132,6 +1345,15 @@ class ComposeMainActivity : AppCompatActivity() {
         // 停止并释放音频输出控制器
         audioOutputController.release()
         dlnaDmcClient.stop()
+
+        // 停止WebSocket服务器
+        try {
+            if (::webSocketServer.isInitialized) {
+                webSocketServer.stop()
+            }
+        } catch (e: Exception) {
+            Log.e("ComposeMainActivity", "停止WebSocket服务器失败", e)
+        }
 
         videoPresentation?.dismiss()
     }

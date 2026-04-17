@@ -76,6 +76,12 @@ export class VideoPlayer {
       this.onPositionUpdate?.(time)
     })
 
+    // 当duration可用时更新
+    this.avPlayer.on('durationUpdate', (duration: number) => {
+      this.duration = duration
+      hilog.info(DOMAIN, TAG, `Duration updated: ${duration}ms`)
+    })
+
     // 播放完成 - 监听stateChange，当状态变为stopped或completed时
     this.avPlayer.on('stateChange', (state: string) => {
       if (state === 'completed' || state === 'stopped') {
@@ -89,6 +95,7 @@ export class VideoPlayer {
     // 错误处理
     this.avPlayer.on('error', (error: BusinessError) => {
       hilog.error(DOMAIN, TAG, `Player error: ${JSON.stringify(error)}`)
+      hilog.error(DOMAIN, TAG, `Error code: ${error.code}, message: ${error.message}`)
     })
   }
 
@@ -96,9 +103,25 @@ export class VideoPlayer {
    * 播放视频
    */
   async play(uri: string, httpHeaders: Record<string, string> = {}): Promise<void> {
+    hilog.info(DOMAIN, TAG, `play方法被调用，avPlayer是否为null: ${this.avPlayer === null}`)
+    hilog.info(DOMAIN, TAG, `HTTP头数量: ${Object.keys(httpHeaders).length}`)
+    hilog.info(DOMAIN, TAG, `HTTP头内容: ${JSON.stringify(httpHeaders)}`)
+
+    // 如果未初始化，尝试自动初始化（音频播放模式）
     if (!this.avPlayer) {
-      hilog.warn(DOMAIN, TAG, 'Not initialized')
-      return
+      hilog.warn(DOMAIN, TAG, 'VideoPlayer未初始化，尝试自动初始化...')
+      try {
+        // 创建AVPlayer实例
+        this.avPlayer = await media.createAVPlayer()
+
+        // 设置事件监听
+        this.setupEventListeners()
+
+        hilog.info(DOMAIN, TAG, 'VideoPlayer自动初始化成功（无Surface模式）')
+      } catch (error) {
+        hilog.error(DOMAIN, TAG, `VideoPlayer自动初始化失败: ${JSON.stringify(error)}`)
+        throw new Error(`VideoPlayer initialization failed: ${JSON.stringify(error)}`)
+      }
     }
 
     try {
@@ -106,7 +129,7 @@ export class VideoPlayer {
 
       // 设置HTTP头（如果支持）
       if (Object.keys(httpHeaders).length > 0) {
-        hilog.info(DOMAIN, TAG, `设置HTTP头: ${JSON.stringify(httpHeaders)}`)
+        hilog.info(DOMAIN, TAG, `设置HTTP头和媒体源`)
 
         // 使用鸿蒙的createMediaSourceWithUrl API设置HTTP头
         const mediaSource = media.createMediaSourceWithUrl(uri, httpHeaders)
@@ -118,17 +141,26 @@ export class VideoPlayer {
         }
 
         this.avPlayer.setMediaSource(mediaSource, playbackStrategy)
+        hilog.info(DOMAIN, TAG, '媒体源已设置')
       } else {
         // 直接设置URL
+        hilog.info(DOMAIN, TAG, '直接设置URL')
         this.avPlayer.url = uri
       }
 
-      // 开始播放
+      // 等待播放器准备好后再设置音量和播放
+      // 先调用play()，播放器会自动准备
       await this.avPlayer.play()
+      hilog.info(DOMAIN, TAG, 'play()已调用')
+
+      // 现在设置音量（播放器已准备好）
+      this.avPlayer.setVolume(1.0)
+      hilog.info(DOMAIN, TAG, '设置音量: 1.0')
 
       hilog.info(DOMAIN, TAG, `Playing: ${uri.substring(0, 100)}...`)
     } catch (error) {
       hilog.error(DOMAIN, TAG, `Play failed: ${JSON.stringify(error)}`)
+      hilog.error(DOMAIN, TAG, `Error code: ${JSON.stringify((error as Record<string, Object>).code)}`)
       throw new Error(`VideoPlayer play failed: ${JSON.stringify(error)}`)
     }
   }
@@ -195,6 +227,13 @@ export class VideoPlayer {
    * 同步播放进度（从车机端同步）
    */
   syncProgress(position: number, duration: number, isPlaying: boolean): void {
+    // 只有在视频真正开始播放后才允许同步
+    // 如果currentPosition为0，说明视频还没开始播放，不要同步
+    if (this.currentPosition === 0) {
+      hilog.debug(DOMAIN, TAG, `视频未开始播放(currentPosition=0)，忽略进度同步`)
+      return
+    }
+
     // 如果差异超过100ms，进行同步
     if (Math.abs(this.currentPosition - position) > 100) {
       hilog.debug(DOMAIN, TAG, `Syncing progress: ${this.currentPosition} -> ${position}`)

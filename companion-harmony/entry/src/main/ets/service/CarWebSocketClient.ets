@@ -48,10 +48,13 @@ export class CarWebSocketClient {
 
   // 播放回调
   private onPlayCommandCallback: ((uri: string, httpHeaders: Record<string, string>) => void) | null = null
+  private onPlayAndSeekCallback: ((uri: string, httpHeaders: Record<string, string>, position: number) => void) | null = null
+  private onResumeCommandCallback: (() => void) | null = null
   private onPauseCommandCallback: (() => void) | null = null
   private onStopCommandCallback: (() => void) | null = null
   private onSeekCommandCallback: ((position: number) => void) | null = null
   private onProgressUpdateCallback: ((position: number, duration: number, isPlaying: boolean) => void) | null = null
+  private onDisconnectedCallback: (() => void) | null = null  // 连接断开回调
 
   /**
    * 连接到车机端
@@ -62,7 +65,7 @@ export class CarWebSocketClient {
       return
     }
 
-    this.carServerUrl = `ws://${carIp}:8080`
+    this.carServerUrl = `ws://${carIp}:9999`
 
     try {
       // 创建WebSocket连接
@@ -101,10 +104,17 @@ export class CarWebSocketClient {
       // 监听连接关闭事件
       this.ws.on('close', (err: BusinessError, value: webSocket.CloseResult) => {
         this.isConnected = false
-        hilog.info(DOMAIN, TAG, '连接已关闭: ' + value.code)
+        hilog.warn(DOMAIN, TAG, '========================================')
+        hilog.warn(DOMAIN, TAG, 'WebSocket连接已关闭!')
+        hilog.warn(DOMAIN, TAG, `关闭码: ${value.code}, 原因: ${value.reason}`)
+        hilog.warn(DOMAIN, TAG, '========================================')
 
         // 停止心跳
         this.stopHeartbeat()
+
+        // 通知连接断开（暂停视频）
+        this.onDisconnectedCallback?.()
+        hilog.info(DOMAIN, TAG, '已通知连接断开，视频应已暂停')
 
         // 尝试重连
         this.scheduleReconnect()
@@ -112,15 +122,21 @@ export class CarWebSocketClient {
 
       // 监听错误事件
       this.ws.on('error', (err: BusinessError) => {
-        hilog.error(DOMAIN, TAG, 'WebSocket错误')
+        hilog.error(DOMAIN, TAG, `WebSocket错误: ${err.code} - ${err.name}`)
+        // WebSocket错误通常意味着连接断开，通知暂停视频
+        if (this.isConnected) {
+          this.isConnected = false
+          this.onDisconnectedCallback?.()
+          hilog.info(DOMAIN, TAG, 'WebSocket错误，已通知连接断开')
+        }
       })
 
       // 连接到服务器
       this.ws.connect(this.carServerUrl, (err: BusinessError, value: boolean) => {
         if (!err) {
-          hilog.info(DOMAIN, TAG, 'WebSocket连接请求已发送')
+          hilog.info(DOMAIN, TAG, `WebSocket连接请求已发送: ${this.carServerUrl}`)
         } else {
-          hilog.error(DOMAIN, TAG, 'WebSocket连接请求失败')
+          hilog.error(DOMAIN, TAG, `WebSocket连接请求失败: ${err.code} - ${err.name}`)
           this.scheduleReconnect()
         }
       })
@@ -172,9 +188,133 @@ export class CarWebSocketClient {
       case 'play':
         if (data) {
           const uri = (data as Record<string, Object>)['uri'] as string
-          const headers = (data as Record<string, Object>)['headers'] as Record<string, string>
+          const headersValue = (data as Record<string, Object>)['headers']
+
+          hilog.info(DOMAIN, TAG, `========================================`)
+          hilog.info(DOMAIN, TAG, `收到play命令`)
+          hilog.info(DOMAIN, TAG, `URI长度: ${uri.length}`)
+          hilog.info(DOMAIN, TAG, `headers值类型: ${typeof headersValue}`)
+          hilog.info(DOMAIN, TAG, `headers值: ${JSON.stringify(headersValue)}`)
+
+          // 解析HTTP头 - 可能是字符串或对象
+          let headers: Record<string, string> = {}
+
+          if (headersValue !== null && headersValue !== undefined) {
+            if (typeof headersValue === 'string') {
+              // 情况1: headers是字符串，需要解析
+              const headersStr = headersValue as string
+              hilog.info(DOMAIN, TAG, `headers是字符串，尝试解析`)
+
+              try {
+                // 尝试标准JSON解析
+                headers = JSON.parse(headersStr) as Record<string, string>
+                hilog.info(DOMAIN, TAG, `成功从JSON解析HTTP头，数量: ${Object.keys(headers).length}`)
+              } catch (e) {
+                // JSON解析失败，尝试解析Java Map的toString格式
+                // 格式: {key1=value1, key2=value2}
+                hilog.warn(DOMAIN, TAG, `JSON解析失败，尝试解析Java Map格式`)
+                try {
+                  // 去掉外层的{ }
+                  const inner = headersStr.trim().substring(1, headersStr.length - 1)
+
+                  // 按 ", " 分割键值对
+                  const pairs = inner.split(', ')
+                  pairs.forEach((pair: string) => {
+                    // 按 = 分割键和值
+                    const equalIndex = pair.indexOf('=')
+                    if (equalIndex > 0) {
+                      const key = pair.substring(0, equalIndex).trim()
+                      const value = pair.substring(equalIndex + 1).trim()
+                      headers[key] = value
+                    }
+                  })
+                  hilog.info(DOMAIN, TAG, `成功从Map格式解析HTTP头，数量: ${Object.keys(headers).length}`)
+                } catch (e2) {
+                  hilog.error(DOMAIN, TAG, `解析Map格式也失败: ${e2}`)
+                }
+              }
+            } else if (typeof headersValue === 'object') {
+              // 情况2: headers已经是对象，直接使用
+              hilog.info(DOMAIN, TAG, `headers是对象，直接使用`)
+              // 转换为Record<string, string>
+              const headersObj = headersValue as Record<string, Object>
+              const keys = Object.keys(headersObj)
+              keys.forEach((key: string) => {
+                const value = headersObj[key]
+                if (typeof value === 'string') {
+                  headers[key] = value as string
+                } else {
+                  headers[key] = JSON.stringify(value)
+                }
+              })
+              hilog.info(DOMAIN, TAG, `成功从对象转换HTTP头，数量: ${Object.keys(headers).length}`)
+            } else {
+              hilog.warn(DOMAIN, TAG, `headers类型未知: ${typeof headersValue}`)
+            }
+          }
+
+          hilog.info(DOMAIN, TAG, `最终HTTP头数量: ${Object.keys(headers).length}`)
+          if (Object.keys(headers).length > 0) {
+            hilog.info(DOMAIN, TAG, `HTTP头内容: ${JSON.stringify(headers).substring(0, 300)}`)
+          }
+          hilog.info(DOMAIN, TAG, `========================================`)
+
           this.onPlayCommandCallback?.(uri, headers)
         }
+        break
+
+      case 'play_and_seek':
+        // 新的同步启动命令：加载视频、跳到指定进度、暂停等待
+        if (data) {
+          const dataRecord = data as Record<string, Object>
+          const uri = dataRecord['uri'] as string
+          const headersValue = dataRecord['headers']
+          const position = dataRecord['position'] as number
+
+          hilog.info(DOMAIN, TAG, `========================================`)
+          hilog.info(DOMAIN, TAG, `收到play_and_seek命令（同步启动）`)
+          hilog.info(DOMAIN, TAG, `URI长度: ${uri.length}`)
+          hilog.info(DOMAIN, TAG, `目标进度: ${position}ms`)
+
+          // 解析HTTP头（与play命令相同的逻辑）
+          let headers: Record<string, string> = {}
+          if (headersValue !== null && headersValue !== undefined) {
+            if (typeof headersValue === 'string') {
+              try {
+                headers = JSON.parse(headersValue as string) as Record<string, string>
+              } catch (e) {
+                // 尝试解析Java Map格式
+                const inner = (headersValue as string).trim().substring(1, (headersValue as string).length - 1)
+                const pairs = inner.split(', ')
+                pairs.forEach((pair: string) => {
+                  const equalIndex = pair.indexOf('=')
+                  if (equalIndex > 0) {
+                    const key = pair.substring(0, equalIndex).trim()
+                    const value = pair.substring(equalIndex + 1).trim()
+                    headers[key] = value
+                  }
+                })
+              }
+            } else if (typeof headersValue === 'object') {
+              const headersObj = headersValue as Record<string, Object>
+              Object.keys(headersObj).forEach((key: string) => {
+                const value = headersObj[key]
+                headers[key] = (typeof value === 'string') ? (value as string) : JSON.stringify(value)
+              })
+            }
+          }
+
+          hilog.info(DOMAIN, TAG, `HTTP头数量: ${Object.keys(headers).length}`)
+          hilog.info(DOMAIN, TAG, `========================================`)
+
+          this.onPlayAndSeekCallback?.(uri, headers, position)
+        }
+        break
+
+      case 'resume':
+        // 恢复播放命令：用于同步启动流程
+        hilog.info(DOMAIN, TAG, `收到resume命令（开始同步播放）`)
+        this.onResumeCommandCallback?.()
         break
 
       case 'pause':
@@ -333,6 +473,27 @@ export class CarWebSocketClient {
    */
   setOnPlayCommand(callback: (uri: string, httpHeaders: Record<string, string>) => void): void {
     this.onPlayCommandCallback = callback
+  }
+
+  /**
+   * 设置播放并跳转命令回调（用于同步启动）
+   */
+  setOnPlayAndSeek(callback: (uri: string, httpHeaders: Record<string, string>, position: number) => void): void {
+    this.onPlayAndSeekCallback = callback
+  }
+
+  /**
+   * 设置恢复播放命令回调（用于同步启动）
+   */
+  setOnResumeCommand(callback: () => void): void {
+    this.onResumeCommandCallback = callback
+  }
+
+  /**
+   * 设置连接断开回调
+   */
+  setOnDisconnected(callback: () => void): void {
+    this.onDisconnectedCallback = callback
   }
 
   setOnPauseCommand(callback: () => void): void {

@@ -37,6 +37,7 @@ fun ModernSettingsCard(
     onMaximizeClick: () -> Unit,
     onDefaultClick: () -> Unit,
     onCustomClick: () -> Unit,
+    onRestartWebSocket: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     ModernCard(modifier = modifier) {
@@ -50,6 +51,16 @@ fun ModernSettingsCard(
             )
 
             Spacer(modifier = Modifier.height(20.dp))
+
+            // WebSocket服务重启按钮
+            ModernQuickAction(
+                icon = "🔌",
+                label = "重启WebSocket服务",
+                onClick = onRestartWebSocket,
+                modifier = Modifier.fillMaxWidth().height(56.dp)
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             // 快捷操作按钮
             Row(

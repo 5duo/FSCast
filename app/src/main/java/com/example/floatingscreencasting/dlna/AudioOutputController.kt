@@ -2,6 +2,7 @@ package com.example.floatingscreencasting.dlna
 
 import android.util.Log
 import com.example.floatingscreencasting.dlna.DlnaDmcClient.DlnaDevice
+import com.example.floatingscreencasting.websocket.CarWebSocketServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -16,12 +17,14 @@ import kotlinx.coroutines.withContext
  */
 class AudioOutputController(
     private val dlnaDmcClient: DlnaDmcClient,
-    private val phoneDeviceManager: PhoneDeviceManager
+    private val phoneDeviceManager: PhoneDeviceManager,
+    private val webSocketServer: CarWebSocketServer? = null
 ) {
 
     companion object {
         private const val TAG = "AudioOutputController"
-        private const val SYNC_INTERVAL_MS = 500L // 进度同步间隔
+        private const val PROGRESS_CHECK_INTERVAL_MS = 10000L // 进度检查间隔：10秒
+        private const val SYNC_THRESHOLD_MS = 2000L // 同步阈值：2秒
     }
 
     enum class OutputMode {
@@ -42,6 +45,7 @@ class AudioOutputController(
         fun onPause()
         fun onSeek(positionMs: Long)
         fun onStop()
+        fun getCurrentPosition(): Long  // 获取当前播放位置
     }
 
     /**
@@ -71,6 +75,7 @@ class AudioOutputController(
 
     /**
      * 切换音频输出模式
+     * 只使用WebSocket通信，不再使用DLNA降级
      */
     suspend fun switchOutputMode(mode: OutputMode, videoUri: String = ""): Boolean {
         Log.i(TAG, "切换音频输出: $currentMode -> $mode")
@@ -86,32 +91,80 @@ class AudioOutputController(
                 return true
             }
             OutputMode.PHONE -> {
-                // 切换到手机端
-                val device = phoneDeviceManager.getSelectedDevice()
-                if (device == null) {
-                    Log.w(TAG, "没有选中的手机设备")
+                // 只使用WebSocket通信
+                Log.i(TAG, "========================================")
+                Log.i(TAG, "切换到手机模式，检查WebSocket连接状态...")
+                Log.i(TAG, "webSocketServer是否为null: ${webSocketServer == null}")
+                if (webSocketServer != null) {
+                    Log.i(TAG, "已连接客户端数量: ${webSocketServer.getClientCount()}")
+                    Log.i(TAG, "已连接客户端列表: ${webSocketServer.getConnectedClients()}")
+                }
+                Log.i(TAG, "当前视频URI: ${currentVideoUri.take(50)}...")
+                Log.i(TAG, "当前视频URI长度: ${currentVideoUri.length}")
+                Log.i(TAG, "HTTP头数量: ${currentHttpHeaders.size}")
+                Log.i(TAG, "========================================")
+
+                if (webSocketServer == null) {
+                    Log.e(TAG, "WebSocket服务器未初始化")
+                    return false
+                }
+
+                if (!webSocketServer.hasConnectedClients()) {
+                    Log.w(TAG, "没有WebSocket客户端连接")
                     return false
                 }
 
                 currentVideoUri = if (videoUri.isNotEmpty()) videoUri else currentVideoUri
+                Log.i(TAG, "使用的视频URI: ${currentVideoUri.take(50)}..., 长度: ${currentVideoUri.length}")
 
-                // 将视频推送到手机端（传递HTTP头）
-                val success = if (currentVideoUri.isNotEmpty()) {
-                    dlnaDmcClient.setAvTransportUri(device, currentVideoUri, currentHttpHeaders) &&
-                            dlnaDmcClient.play(device)
+                if (currentVideoUri.isNotEmpty()) {
+                    // 新的同步方案：
+                    // 1. 车机先暂停
+                    Log.i(TAG, "步骤1: 车机暂停播放")
+                    playbackStateListener?.onPause()
+
+                    // 2. 发送播放命令+当前进度给手机
+                    // 从监听器获取当前播放进度
+                    val currentPositionMs = playbackStateListener?.getCurrentPosition() ?: 0L
+                    Log.i(TAG, "步骤2: 发送播放命令到手机端，进度: ${currentPositionMs}ms")
+                    Log.i(TAG, "视频URI: ${currentVideoUri.take(100)}...")
+                    Log.i(TAG, "HTTP头数量: ${currentHttpHeaders.size}")
+
+                    val sentCount = webSocketServer.sendPlayCommandWithPosition(
+                        currentVideoUri,
+                        currentHttpHeaders,
+                        currentPositionMs
+                    )
+
+                    Log.i(TAG, "发送结果: $sentCount 个客户端收到命令")
+
+                    if (sentCount == 0) {
+                        Log.e(TAG, "WebSocket发送播放命令失败：没有客户端收到命令")
+                        return false
+                    }
+
+                    // 等待手机端加载视频（2秒）
+                    Log.i(TAG, "步骤3: 等待手机端加载视频...")
+                    delay(2000)
+
+                    // 4. 发送"同时播放"命令
+                    Log.i(TAG, "步骤4: 发送同时播放命令")
+                    webSocketServer.sendResumeCommand()
                 } else {
-                    dlnaDmcClient.play(device)
+                    Log.e(TAG, "========================================")
+                    Log.e(TAG, "错误：当前没有视频URI，无法切换到手机模式")
+                    Log.e(TAG, "请先投屏视频到车机，然后再切换音频输出")
+                    Log.e(TAG, "========================================")
+                    return false
                 }
 
-                if (success) {
-                    currentMode = mode
-                    startProgressSync()
-                    // 静音车机端
-                    muteControlCallback?.setMuted(true)
-                    Log.i(TAG, "手机端模式：车机静音")
-                }
-
-                return success
+                // 切换成功
+                currentMode = mode
+                startProgressSync()
+                // 静音车机端
+                muteControlCallback?.setMuted(true)
+                Log.i(TAG, "手机端模式（WebSocket）：车机静音，同步启动完成")
+                return true
             }
         }
     }
@@ -120,11 +173,21 @@ class AudioOutputController(
      * 设置当前视频URI
      */
     fun setCurrentVideoUri(uri: String, httpHeaders: Map<String, String> = emptyMap()) {
+        Log.i(TAG, "========================================")
+        Log.i(TAG, "setCurrentVideoUri被调用")
+        Log.i(TAG, "URI长度: ${uri.length}")
+        Log.i(TAG, "URI内容: ${uri.take(100)}...")
+        Log.i(TAG, "HTTP头数量: ${httpHeaders.size}")
         currentVideoUri = uri
         currentHttpHeaders = httpHeaders
-        Log.d(TAG, "设置当前视频URI: ${uri.take(50)}...")
-        Log.d(TAG, "HTTP头: $httpHeaders")
+        Log.i(TAG, "URI已保存到currentVideoUri")
+        Log.i(TAG, "========================================")
     }
+
+    /**
+     * 获取当前视频URI（用于调试）
+     */
+    fun getCurrentVideoUri(): String = currentVideoUri
 
     /**
      * 获取当前输出模式
@@ -143,6 +206,21 @@ class AudioOutputController(
                 true
             }
             OutputMode.PHONE -> {
+                // 优先使用WebSocket通信
+                if (webSocketServer != null && webSocketServer.hasConnectedClients()) {
+                    // 如果需要跳转，先跳转再播放
+                    if (phonePositionMs > 0) {
+                        webSocketServer.sendSeekCommand(phonePositionMs)
+                    }
+
+                    val sentCount = webSocketServer.sendPlayCommand(currentVideoUri, currentHttpHeaders)
+                    if (sentCount > 0) {
+                        startProgressSync()
+                        return true
+                    }
+                }
+
+                // 降级到DLNA方式
                 val device = phoneDeviceManager.getSelectedDevice()
                 if (device == null) {
                     Log.w(TAG, "没有选中的手机设备")
@@ -177,6 +255,16 @@ class AudioOutputController(
                 true
             }
             OutputMode.PHONE -> {
+                // 优先使用WebSocket通信
+                if (webSocketServer != null && webSocketServer.hasConnectedClients()) {
+                    val sentCount = webSocketServer.sendPauseCommand()
+                    if (sentCount > 0) {
+                        stopProgressSync()
+                        return true
+                    }
+                }
+
+                // 降级到DLNA方式
                 val device = phoneDeviceManager.getSelectedDevice()
                 if (device == null) {
                     Log.w(TAG, "没有选中的手机设备")
@@ -205,6 +293,13 @@ class AudioOutputController(
                 true
             }
             OutputMode.PHONE -> {
+                // 优先使用WebSocket通信
+                if (webSocketServer != null && webSocketServer.hasConnectedClients()) {
+                    val sentCount = webSocketServer.sendStopCommand()
+                    return sentCount > 0
+                }
+
+                // 降级到DLNA方式
                 val device = phoneDeviceManager.getSelectedDevice()
                 if (device == null) {
                     Log.w(TAG, "没有选中的手机设备")
@@ -231,6 +326,13 @@ class AudioOutputController(
                 true
             }
             OutputMode.PHONE -> {
+                // 优先使用WebSocket通信
+                if (webSocketServer != null && webSocketServer.hasConnectedClients()) {
+                    val sentCount = webSocketServer.sendSeekCommand(positionMs)
+                    return sentCount > 0
+                }
+
+                // 降级到DLNA方式
                 val device = phoneDeviceManager.getSelectedDevice()
                 if (device == null) {
                     Log.w(TAG, "没有选中的手机设备")
@@ -242,36 +344,36 @@ class AudioOutputController(
         }
     }
 
-    /**
-     * 同步车机进度到手机
-     * 当车机端进度更新时调用
-     */
-    suspend fun syncProgress(positionMs: Long): Boolean {
-        if (currentMode != OutputMode.PHONE) {
-            return true // 车机模式不需要同步
-        }
-
-        val device = phoneDeviceManager.getSelectedDevice()
-        if (device == null) {
-            return false
-        }
-
-        // 发送Seek命令到手机端
-        return dlnaDmcClient.seek(device, positionMs)
-    }
 
     /**
      * 开始进度同步
-     * 定期将车机进度同步到手机
+     * 每10秒检查一次进度，发送给手机端
+     * 手机端收到后会检查差异，如果超过2秒则重新对齐
      */
     private fun startProgressSync() {
         syncJob?.cancel()
         syncJob = scope.launch {
             while (currentMode == OutputMode.PHONE) {
-                delay(SYNC_INTERVAL_MS)
-                // 进度同步逻辑由外部调用syncProgress实现
+                delay(PROGRESS_CHECK_INTERVAL_MS) // 每10秒检查一次
+
+                // 获取车机端当前播放进度
+                val currentPosition = playbackStateListener?.getCurrentPosition() ?: 0L
+                Log.d(TAG, "进度同步定时器: mode=$currentMode, position=${currentPosition}ms")
+
+                // 发送给手机端
+                if (webSocketServer != null && webSocketServer.hasConnectedClients()) {
+                    Log.d(TAG, "进度检查: 发送车机进度 ${currentPosition}ms 到手机端")
+                    webSocketServer.sendProgressUpdate(
+                        currentPosition,
+                        0,  // duration不需要
+                        true  // isPlaying不需要精确判断
+                    )
+                } else {
+                    Log.w(TAG, "进度同步: WebSocket未连接或无客户端")
+                }
             }
         }
+        Log.i(TAG, "进度同步定时器已启动")
     }
 
     /**

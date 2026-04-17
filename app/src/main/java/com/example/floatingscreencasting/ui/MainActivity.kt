@@ -59,6 +59,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var audioOutputController: AudioOutputController
     private lateinit var dlnaDmcClient: DlnaDmcClient
     private lateinit var phoneDeviceManager: PhoneDeviceManager
+    private lateinit var webSocketServer: com.example.floatingscreencasting.websocket.CarWebSocketServer
 
     // 当前选中的比例
     private var currentAspectRatio = "16:9"
@@ -502,6 +503,7 @@ class MainActivity : AppCompatActivity() {
             if (it.playbackState != Player.STATE_IDLE) {
                 val currentPosition = it.currentPosition
                 val duration = it.duration
+                val isPlaying = it.isPlaying
 
                 if (duration > 0) {
                     binding.progressSlider.valueTo = duration.toFloat()
@@ -510,6 +512,7 @@ class MainActivity : AppCompatActivity() {
                     binding.currentPositionText.text = formatTime(currentPosition)
                     binding.durationText.text = formatTime(duration)
                 }
+                // 注意：进度同步由AudioOutputController内部的定时器自动处理，不需要在这里调用
             }
         }
     }
@@ -687,14 +690,25 @@ class MainActivity : AppCompatActivity() {
      * 初始化音频输出控制器
      */
     private fun initializeAudioOutputController() {
+        // 初始化WebSocket服务器（在后台线程启动）
+        webSocketServer = com.example.floatingscreencasting.websocket.CarWebSocketServer(8080)
+        Thread {
+            try {
+                webSocketServer.start()
+                Log.i("MainActivity", "WebSocket服务器已启动，监听端口8080")
+            } catch (e: Exception) {
+                Log.e("MainActivity", "WebSocket服务器启动失败", e)
+            }
+        }.start()
+
         // 初始化DLNA DMC客户端（用于发现和控制手机设备）
         dlnaDmcClient = DlnaDmcClient(this)
 
         // 初始化手机设备管理器
         phoneDeviceManager = PhoneDeviceManager(this)
 
-        // 初始化音频输出控制器
-        audioOutputController = AudioOutputController(dlnaDmcClient, phoneDeviceManager)
+        // 初始化音频输出控制器（传入WebSocket服务器）
+        audioOutputController = AudioOutputController(dlnaDmcClient, phoneDeviceManager, webSocketServer)
 
         // 设置静音控制回调
         audioOutputController.setMuteControlCallback(object : AudioOutputController.MuteControlCallback {
@@ -722,10 +736,29 @@ class MainActivity : AppCompatActivity() {
             override fun onStop() {
                 videoPresentation?.stop()
             }
+
+            override fun getCurrentPosition(): Long {
+                return videoPresentation?.getExoPlayer()?.currentPosition ?: 0L
+            }
         })
 
         // 启动DLNA DMC客户端（开始发现手机设备）
         dlnaDmcClient.start()
+
+        // 监听WebSocket连接状态
+        webSocketServer.onClientConnected = { clientId ->
+            Log.i("MainActivity", "手机端已连接: $clientId")
+            runOnUiThread {
+                Toast.makeText(this, "FSCast Remote已连接", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        webSocketServer.onClientDisconnected = { clientId ->
+            Log.i("MainActivity", "手机端已断开: $clientId")
+            runOnUiThread {
+                Toast.makeText(this, "FSCast Remote已断开", Toast.LENGTH_SHORT).show()
+            }
+        }
 
         // 监听设备列表变化
         dlnaDmcClient.onDeviceListChanged = { devices ->
@@ -840,6 +873,15 @@ class MainActivity : AppCompatActivity() {
             EventBus.getDefault().unregister(this)
         } catch (e: Exception) {
             Log.e("MainActivity", "取消注册EventBus失败", e)
+        }
+
+        // 停止WebSocket服务器
+        try {
+            if (::webSocketServer.isInitialized) {
+                webSocketServer.stop()
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "停止WebSocket服务器失败", e)
         }
 
         lifecycleScope.launch {

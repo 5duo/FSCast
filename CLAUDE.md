@@ -4,13 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FSCast is a DLNA Digital Media Renderer (DMR) receiver application that uses Android's Presentation API to display content on multiple screens within a single Android system. It displays a floating video window on a secondary display (driving screen) while providing playback controls on the primary display (central control screen).
+FSCast is a DLNA Digital Media Renderer (DMR) receiver application that uses Android's Presentation API to display content on multiple screens within a single Android system. It displays a floating video window on a secondary display (driving screen) while providing playback controls on the primary display (central control screen). It also supports audio output separation to a companion phone app via WebSocket communication.
 
 **Application Name**: FSCast (FloatingScreenCasting)
 
-**Current Version**: v0.1.0-beta
+**Current Version**: v0.2.0
 
 **Target Hardware**: In-car dual-display systems or any multi-screen Android system where the secondary display has a fixed Display ID (typically 2).
+
+**Companion App**: FSCast Remote (HarmonyOS) - Receives video from car and plays audio
 
 ## Build & Run Commands
 
@@ -67,6 +69,41 @@ The app uses Android's **Presentation API** to show content on a secondary displ
 
 **Key Design Decision**: The driving display is hardcoded to `displayId = 2`. This is specific to the target hardware and may need adjustment for different devices.
 
+### WebSocket Communication Architecture
+
+The app uses WebSocket for bidirectional communication between car and phone:
+
+```
+┌─────────────────┐         WebSocket          ┌─────────────────┐
+│   Car (FSCast)  │ ◄──────────────────────► │  Phone (Remote) │
+│                 │      (Port 9999)         │                 │
+│  Commands:      │                           │  Commands:      │
+│  - play_and_seek│                           │  - state_update │
+│  - resume       │                           │  - error        │
+│  - pause        │                           │                 │
+│  - seek         │                           │                 │
+│  - progress     │                           │                 │
+└─────────────────┘                           └─────────────────┘
+```
+
+**Synchronized Startup Flow**:
+1. Car pauses playback and sends `play_and_seek` command with current position
+2. Phone loads video, seeks to position, and pauses (waiting state)
+3. Car waits 2 seconds for phone to load
+4. Car sends `resume` command
+5. Both devices start playing simultaneously
+
+**Progress Synchronization**:
+- Car sends progress update every 10 seconds
+- Phone checks difference with car's position
+- If difference > 2 seconds, phone seeks to car's position
+- Ensures both devices stay synchronized
+
+**Disconnection Protection**:
+- Phone detects WebSocket disconnection and immediately pauses playback
+- Prevents audio from continuing while video stops
+- Car also detects connection state and updates UI accordingly
+
 ### Package Structure
 
 ```
@@ -99,6 +136,7 @@ com.example.floatingscreencasting/
 ├── history/                    # Playback history
 │   └── PlaybackHistoryManager.kt
 └── utils/                      # Utility classes
+    └── Logger.kt               # Unified logging utility
 ```
 
 ### Technology Stack
@@ -109,6 +147,7 @@ com.example.floatingscreencasting/
 - **Media3 ExoPlayer** 1.5.1 for video playback
 - **EventBus** 3.3.1 for event communication
 - **OkHttp** 4.12.0 for HTTP requests
+- **Java-WebSocket** for WebSocket communication
 
 ### UI Framework
 - **Primary Display**: Jetpack Compose with Material 3 design system
@@ -121,26 +160,19 @@ com.example.floatingscreencasting/
 - **Minimum SDK**: 30 (Android 11)
 - **Target SDK**: 36
 - **Compile SDK**: 36
-- **Version**: 0.1.0-beta
-- **Version Code**: 100
-- **Default Display Resolution**: 1920x720
-- **Default Floating Window Size**: 960x540
-
-### Important Configuration
-
-- **Minimum SDK**: 30 (Android 11)
-- **Target SDK**: 36
+- **Version**: 0.2.0
+- **Version Code**: 200
 - **Default Display Resolution**: 1920x720
 - **Default Floating Window Size**: 960x540
 
 ### Floating Window Behavior
 
 The floating window on the driving display:
-- Uses `FLAG_NOT_FOCUSABLE` to allow touch passthrough (non-interactive)
+- Supports touch interaction (not FLAG_NOT_FOCUSABLE)
 - Position and size can be adjusted in real-time via Compose sliders
 - Default position: (480, 90) - centered horizontally
 - Shows a "等待投屏..." loading state before video playback
-- Supports touch interaction (unlike traditional non-interactive overlays)
+- Automatically mutes when audio output is switched to phone
 
 ### Display Detection Flow
 
@@ -168,6 +200,7 @@ The floating window on the driving display:
 
 ### WebSocket Communication Files
 - `app/src/main/java/com/example/floatingscreencasting/websocket/CarWebSocketServer.kt` - WebSocket server for phone connection
+- `companion-harmony/entry/src/main/ets/service/CarWebSocketClient.ets` - WebSocket client for phone
 
 ### UI Components
 - `app/src/main/java/com/example/floatingscreencasting/ui/composable/ModernPlaybackCard.kt` - Playback control with audio output selector
@@ -221,10 +254,10 @@ The floating window on the driving display:
 ### 2. 音频分离播放流程（B站 → 车机画面 + 手机声音）
 
 ```
-┌─────────┐    DLNA     ┌─────────────┐    DLNA     ┌──────────────┐
-│  B站App │ ──────────> │   FSCast    │ ──────────> │ FSCast Remote │
-│ (手机)  │  (投屏)   │  (车机端)    │  (推送)   │  (鸿蒙手机)   │
-└─────────┘           └─────────────┘           └──────────────┘
+┌─────────┐    DLNA     ┌─────────────┐    WebSocket  ┌──────────────┐
+│  B站App │ ──────────> │   FSCast    │ ────────────> │ FSCast Remote │
+│ (手机)  │  (投屏)   │  (车机端)    │   (推送)     │  (鸿蒙手机)   │
+└─────────┘           └─────────────┘               └──────────────┘
                             │                              │
                             ▼                              ▼
                        ┌─────────────┐              ┌──────────────┐
@@ -237,10 +270,15 @@ The floating window on the driving display:
 **详细步骤**:
 1. **投屏开始**: B站投屏到FSCast，视频开始在车机播放
 2. **用户切换**: 用户在车机UI点击"切换到手机"按钮
-3. **车机静音**: AudioOutputController设置车机视频静音
-4. **推送到手机**: 车机通过DlnaDmcClient将视频URL和HTTP头推送到手机
-5. **手机播放**: 手机端接收DLNA命令，使用createMediaSourceWithUrl播放（带HTTP头）
-6. **进度同步**: 车机每500ms同步进度到手机，确保两个设备进度一致
+3. **同步启动**:
+   - 车机暂停播放
+   - 发送`play_and_seek`命令（包含当前进度）
+   - 手机加载视频、跳转到指定进度、暂停等待
+   - 等待2秒让手机加载
+   - 车机发送`resume`命令
+   - 两端同时开始播放
+4. **进度同步**: 车机每10秒同步进度到手机
+5. **断线保护**: 手机检测到连接断开立即暂停
 
 ### 3. HTTP头传递链路（B站反爬虫支持）
 
@@ -255,48 +293,131 @@ B站App → [HTTP Headers] → FSCast DlnaHttpServer
                                     │
                     用户切换音频输出时
                                     ▼
-                        DlnaDmcClient.setAvTransportURI()
+                        WebSocket.sendPlayCommand(uri, headers)
                                     │
-                    ┌───────────────────────┴──────────────────────┐
-                    │             DLNA元数据 (custom标签)           │
-                    │  <custom xmlns=".../headers">              │
-                    │    {"user-agent": "...", "referer": "..."}   │
-                    └───────────────────────┬──────────────────────┘
-                                            ▼
-                        FSCast Remote DlnaHttpServer
-                                            │
-                                            ▼
-                                    extractHttpHeadersFromMetadata()
-                                            │
-                                            ▼
+                    ┌───────────────┴────────────────┐
+                    │     WebSocket JSON Message     │
+                    │  {"type":"command",            │
+                    │   "action":"play_and_seek",    │
+                    │   "data":{                     │
+                    │     "uri":"...",               │
+                    │     "headers":{...},           │
+                    │     "position":...             │
+                    │   }}                           │
+                    └───────────────┬────────────────┘
+                                    ▼
+                        FSCast Remote CarWebSocketClient
+                                    │
+                                    ▼
                         VideoPlayer.play(uri, httpHeaders)
-                                            │
-                                            ▼
+                                    │
+                                    ▼
                         createMediaSourceWithUrl(uri, httpHeaders)
 ```
 
-### 4. 设备发现和管理
+### 4. WebSocket消息协议
 
-**车机端发现手机**:
-1. DlnaDmcClient发送M-SEARCH广播
-2. 手机端SsdpServer响应NOTIFY消息
-3. PhoneDeviceManager过滤和存储设备列表
-4. UI显示已连接设备数量和名称
+**车机 → 手机（命令）**:
 
-**设备过滤规则**:
-- 设备名包含"FSCast"、"Remote"、"Phone"
-- 制造商包含"HarmonyOS"、"Honor"
+```javascript
+// 播放并跳转（同步启动用）
+{
+  "type": "command",
+  "action": "play_and_seek",
+  "timestamp": 1234567890,
+  "data": {
+    "uri": "https://example.com/video.mp4",
+    "headers": {
+      "user-agent": "...",
+      "referer": "..."
+    },
+    "position": 120000  // 毫秒
+  }
+}
+
+// 恢复播放（同步启动用）
+{
+  "type": "command",
+  "action": "resume",
+  "timestamp": 1234567890,
+  "data": {}
+}
+
+// 暂停
+{
+  "type": "command",
+  "action": "pause",
+  "timestamp": 1234567890,
+  "data": {}
+}
+
+// 跳转
+{
+  "type": "command",
+  "action": "seek",
+  "timestamp": 1234567890,
+  "data": {
+    "position": 120000
+  }
+}
+
+// 进度更新（同步用）
+{
+  "type": "command",
+  "action": "progress",
+  "timestamp": 1234567890,
+  "data": {
+    "position": 120000,
+    "duration": 3600000,
+    "isPlaying": true
+  }
+}
+```
+
+**手机 → 车机（状态更新）**:
+
+```javascript
+// 连接成功
+{
+  "type": "connected",
+  "data": {
+    "deviceType": "harmonyos_phone",
+    "timestamp": 1234567890
+  }
+}
+
+// 状态更新
+{
+  "type": "state_update",
+  "data": {
+    "position": 120000,
+    "duration": 3600000,
+    "isPlaying": true,
+    "timestamp": 1234567890
+  }
+}
+
+// 错误报告
+{
+  "type": "error",
+  "data": {
+    "message": "Failed to load video",
+    "timestamp": 1234567890
+  }
+}
+```
 
 ### 5. 进度同步机制
 
 **同步触发**:
-- 车机端VideoPresentation定期（每10秒）保存播放进度
-- AudioOutputController每500ms检查进度并同步到手机
+- 车机端AudioOutputController每10秒检查一次进度
+- 发送`progress`命令到手机端
+- 手机端收到后检查与车机端的差异
 
 **同步方式**:
-- 车机端通过DlnaDmcClient.seek()发送Seek命令到手机
-- 手机端VideoPlayer在差异>100ms时执行seek
-- 网络延迟补偿：考虑传输时间
+- 手机端VideoPlayer检查差异是否>2秒
+- 如果是，执行seek操作对齐进度
+- 考虑网络延迟，不频繁同步
 
 ### 6. 音频输出模式
 
@@ -308,11 +429,41 @@ B站App → [HTTP Headers] → FSCast DlnaHttpServer
 **PHONE模式**:
 - 车机端播放视频（静音）
 - 手机端播放视频+音频
-- 进度自动同步
+- 进度自动同步（每10秒）
+- 连接断开自动暂停
 
 **切换时机**:
 - 用户手动切换（点击UI按钮）
-- 自动切换（检测到设备连接/断开）
+- 切换时执行同步启动流程
+
+## Code Quality Improvements
+
+### Recent Refactoring (v0.2.0)
+
+**Thread Safety**:
+- Changed `mutableMapOf` to `ConcurrentHashMap` in CarWebSocketServer
+- Added null safety checks for WebSocket client IDs
+- Prevents concurrent modification exceptions
+
+**Code Cleanup**:
+- Removed deprecated `syncProgress()` method from AudioOutputController
+- Removed calls to deprecated method in ComposeMainActivity and MainActivity
+- Progress synchronization now handled by internal timer only
+
+**Unified Logging**:
+- Created `utils/Logger.kt` for consistent logging
+- Provides methods with optional dividers for better log readability
+- Can be used to replace repetitive logging code
+
+**Configuration Persistence**:
+- Added preferences-based IP address storage in HarmonyOS app
+- Car IP address now persists across app restarts
+- User can modify and save car IP address
+
+**Type Safety**:
+- Fixed ArkTS compiler errors in HarmonyOS app
+- Added explicit type annotations for HTTP options
+- Resolved import issues
 
 ## Completed Features
 
@@ -333,8 +484,11 @@ B站App → [HTTP Headers] → FSCast DlnaHttpServer
 - [x] **Bilibili anti-crawler support (HTTP headers transmission)**
 - [x] **Phone device discovery and management**
 - [x] **WebSocket communication between car and phone**
-- [x] **Real-time progress synchronization between devices**
-- [x] **Audio output mode switching UI**
+- [x] **Synchronized startup flow (play_and_seek + resume)**
+- [x] **Progress synchronization (every 10 seconds, 2-second threshold)**
+- [x] **Disconnection protection (auto-pause on phone)**
+- [x] **Thread safety improvements (ConcurrentHashMap)**
+- [x] **Code cleanup and quality improvements**
 
 ### 🔬 Researched (Not Implemented)
 - [ ] Bluetooth audio output (system restriction - requires system-level whitelist)
@@ -348,22 +502,29 @@ B站App → [HTTP Headers] → FSCast DlnaHttpServer
 
 ## Development Notes
 
-### Recent Changes (v0.1.0-beta)
-- Migrated from View system to Jetpack Compose
-- Removed test activities (BluetoothAudioTestActivity, RootAudioTestActivity, DirectAudioTestActivity)
-- Cleaned up project structure
-- Organized technical documentation in `docs/` directory
-- Created GitHub repository and first beta release
+### Recent Changes (v0.2.0)
+- Implemented WebSocket bidirectional communication
+- Added synchronized startup flow for audio output separation
+- Implemented progress synchronization (10-second interval)
+- Added disconnection protection (auto-pause on phone)
+- Fixed thread safety issues (ConcurrentHashMap)
+- Removed deprecated code (syncProgress method)
+- Created unified Logger utility
+- Added configuration persistence for car IP address
+- Fixed ArkTS compiler errors in HarmonyOS app
+- Updated documentation
 
 ### Known Limitations
-- **Bluetooth Audio**: System restriction prevents third-party apps from using A2DP audio output on target hardware. Audio plays from speakers only.
+- **Bluetooth Audio**: System restriction prevents third-party apps from using A2DP audio output on target hardware. Solved by pushing audio to phone via WebSocket.
 - **Display ID**: Hardcoded to `displayId = 2` for specific hardware. May need adjustment for different devices.
 - **Package Name**: Still uses `com.example.floatingscreencasting` (should be changed for production)
+- **Single Phone Support**: Currently only supports one phone connected at a time
 
 ### Future Enhancements
 - Change package name to production domain
 - Add more screen ratio options
-- Implement audio output device selection
+- Implement multi-phone support
 - Add playlist management
 - Support more video formats
 - Improve error handling and user feedback
+- Add automatic device discovery without manual IP configuration
