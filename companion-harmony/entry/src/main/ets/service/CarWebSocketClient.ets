@@ -55,6 +55,8 @@ export class CarWebSocketClient {
   private onSeekCommandCallback: ((position: number) => void) | null = null
   private onProgressUpdateCallback: ((position: number, duration: number, isPlaying: boolean) => void) | null = null
   private onDisconnectedCallback: (() => void) | null = null  // 连接断开回调
+  private onConnectedCallback: (() => void) | null = null  // 连接成功回调
+  private onConnectionStatusChangeCallback: ((isConnected: boolean) => void) | null = null  // 连接状态变化回调
 
   /**
    * 连接到车机端
@@ -89,6 +91,12 @@ export class CarWebSocketClient {
 
           // 启动心跳
           this.startHeartbeat()
+
+          // 通知连接成功
+          this.onConnectedCallback?.()
+
+          // 通知连接状态变化
+          this.onConnectionStatusChangeCallback?.(true)
         } else {
           hilog.error(DOMAIN, TAG, '连接打开失败')
         }
@@ -114,6 +122,10 @@ export class CarWebSocketClient {
 
         // 通知连接断开（暂停视频）
         this.onDisconnectedCallback?.()
+
+        // 通知连接状态变化
+        this.onConnectionStatusChangeCallback?.(false)
+
         hilog.info(DOMAIN, TAG, '已通知连接断开，视频应已暂停')
 
         // 尝试重连
@@ -127,6 +139,10 @@ export class CarWebSocketClient {
         if (this.isConnected) {
           this.isConnected = false
           this.onDisconnectedCallback?.()
+
+          // 通知连接状态变化
+          this.onConnectionStatusChangeCallback?.(false)
+
           hilog.info(DOMAIN, TAG, 'WebSocket错误，已通知连接断开')
         }
       })
@@ -494,6 +510,20 @@ export class CarWebSocketClient {
    */
   setOnDisconnected(callback: () => void): void {
     this.onDisconnectedCallback = callback
+  }
+
+  /**
+   * 设置连接成功回调
+   */
+  setOnConnected(callback: () => void): void {
+    this.onConnectedCallback = callback
+  }
+
+  /**
+   * 设置连接状态变化回调
+   */
+  setOnConnectionStatusChange(callback: (isConnected: boolean) => void): void {
+    this.onConnectionStatusChangeCallback = callback
   }
 
   setOnPauseCommand(callback: () => void): void {

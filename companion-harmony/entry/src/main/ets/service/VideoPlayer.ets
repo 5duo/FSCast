@@ -1,7 +1,7 @@
 /**
  * 视频播放器
  * 鸿蒙手机端DLNA DMR - 使用AVPlayer播放HTTP视频流
- * 支持视频+音频播放和进度同步
+ * 支持视频+音频播放和进度同步，支持后台播放
  */
 import media from '@ohos.multimedia.media'
 import { hilog } from '@kit.PerformanceAnalysisKit'
@@ -17,9 +17,6 @@ export class VideoPlayer {
   private isPlaying: boolean = false
   private currentPosition: number = 0
   private duration: number = 0
-
-  // 播放模式
-  private playbackMode: 'video_audio' | 'audio_only' = 'video_audio'
 
   // 事件回调
   private onPositionUpdate: ((position: number) => void) | null = null
@@ -136,7 +133,7 @@ export class VideoPlayer {
         const playbackStrategy: media.PlaybackStrategy = {
           preferredWidth: 1920,
           preferredHeight: 1080,
-          preferredBufferDuration: 3,
+          preferredBufferDuration: 5,  // 5秒缓冲（适应网络波动）
           preferredHdr: false
         }
 
@@ -216,14 +213,6 @@ export class VideoPlayer {
   }
 
   /**
-   * 设置播放模式
-   */
-  setPlaybackMode(mode: 'video_audio' | 'audio_only'): void {
-    this.playbackMode = mode
-    hilog.info(DOMAIN, TAG, `Playback mode: ${mode}`)
-  }
-
-  /**
    * 同步播放进度（从车机端同步）
    */
   syncProgress(position: number, duration: number, isPlaying: boolean): void {
@@ -234,8 +223,8 @@ export class VideoPlayer {
       return
     }
 
-    // 如果差异超过100ms，进行同步
-    if (Math.abs(this.currentPosition - position) > 100) {
+    // 如果差异超过1秒，进行同步
+    if (Math.abs(this.currentPosition - position) > 1000) {
       hilog.debug(DOMAIN, TAG, `Syncing progress: ${this.currentPosition} -> ${position}`)
       this.seek(position)
     }

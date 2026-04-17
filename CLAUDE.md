@@ -8,11 +8,11 @@ FSCast is a DLNA Digital Media Renderer (DMR) receiver application that uses And
 
 **Application Name**: FSCast (FloatingScreenCasting)
 
-**Current Version**: v0.2.0
+**Current Version**: v0.3.1-dev
 
 **Target Hardware**: In-car dual-display systems or any multi-screen Android system where the secondary display has a fixed Display ID (typically 2).
 
-**Companion App**: FSCast Remote (HarmonyOS) - Receives video from car and plays audio
+**Companion App**: FSCast Remote (HarmonyOS) - Receives video from car and plays audio with background playback support
 
 ## Build & Run Commands
 
@@ -69,9 +69,40 @@ The app uses Android's **Presentation API** to show content on a secondary displ
 
 **Key Design Decision**: The driving display is hardcoded to `displayId = 2`. This is specific to the target hardware and may need adjustment for different devices.
 
+### HarmonyOS Phone UI Architecture (v0.3.1+)
+
+The phone app uses a **console-style UI** with modular components:
+
+```
+┌─────────────────────────────┐
+│     StatusPanel             │  ← Collapsible status display
+│   (WebSocket/Network/…)     │
+├─────────────────────────────┤
+│     VideoPlayerCard         │  ← Unified video player
+│   (16:9, HTTP headers)      │
+├─────────────────────────────┤
+│     VideoUrlCard            │  ← URL display + copy/download
+│   (URL/Download/Progress)   │
+├─────────────────────────────┤
+│     ControlPanel            │  ← Reconnect + IP settings
+│   (Connection management)   │
+└─────────────────────────────┘
+```
+
+**Component Architecture**:
+- **StatusPanel**: Collapsible panel showing WebSocket, network, and playback status
+- **VideoPlayerCard**: Unified video player with HTTP headers support
+- **VideoUrlCard**: Displays received video URL with copy and download functionality
+- **ControlPanel**: Reconnect button and IP configuration dialog
+- **CarIpDialog**: IP address input dialog with validation and quick selection
+
+**Communication**: Phone端只通过WebSocket与车机端通信，不再有DLNA DMR功能
+
 ### WebSocket Communication Architecture
 
 The app uses WebSocket for bidirectional communication between car and phone:
+
+**Important**: Phone端已移除DLNA DMR功能，现在只通过WebSocket与车机端通信。
 
 ```
 ┌─────────────────┐         WebSocket          ┌─────────────────┐
@@ -96,7 +127,7 @@ The app uses WebSocket for bidirectional communication between car and phone:
 **Progress Synchronization**:
 - Car sends progress update every 10 seconds
 - Phone checks difference with car's position
-- If difference > 2 seconds, phone seeks to car's position
+- If difference > 1 second, phone seeks to car's position
 - Ensures both devices stay synchronized
 
 **Disconnection Protection**:
@@ -220,11 +251,16 @@ The floating window on the driving display:
 ### Companion App Files
 - `companion-android/` - Android phone companion app (FSCast Remote)
 - `companion-harmony/` - HarmonyOS phone companion app (FSCast Remote)
-  - `entry/src/main/ets/pages/Index.ets` - Main page with DLNA DMR
-  - `entry/src/main/ets/service/DlnaHttpServer.ets` - DLNA HTTP server
-  - `entry/src/main/ets/service/SsdpServer.ets` - SSDP device discovery
+  - `entry/src/main/ets/pages/Index.ets` - Main page with WebSocket client and video player
+  - `entry/src/main/ets/components/StatusPanel.ets` - Collapsible status panel component
+  - `entry/src/main/ets/components/VideoPlayerCard.ets` - Unified video player card
+  - `entry/src/main/ets/components/VideoUrlCard.ets` - Video URL display with copy and download
+  - `entry/src/main/ets/components/ControlPanel.ets` - Bottom control panel with reconnect and IP settings
+  - `entry/src/main/ets/components/CarIpDialog.ets` - Car IP configuration dialog
   - `entry/src/main/ets/service/VideoPlayer.ets` - Video player with HTTP headers support
   - `entry/src/main/ets/service/CarWebSocketClient.ets` - WebSocket client for car connection
+  - `entry/src/main/ets/service/MediaSessionService.ets` - AVSession integration for background playback
+  - `entry/src/main/ets/service/BackgroundService.ets` - Background task management
 
 ## 投屏功能业务流程
 
@@ -415,7 +451,7 @@ B站App → [HTTP Headers] → FSCast DlnaHttpServer
 - 手机端收到后检查与车机端的差异
 
 **同步方式**:
-- 手机端VideoPlayer检查差异是否>2秒
+- 手机端VideoPlayer检查差异是否>1秒
 - 如果是，执行seek操作对齐进度
 - 考虑网络延迟，不频繁同步
 
@@ -465,10 +501,72 @@ B站App → [HTTP Headers] → FSCast DlnaHttpServer
 - Added explicit type annotations for HTTP options
 - Resolved import issues
 
+### HarmonyOS Phone Client Optimization (v0.3.0-dev)
+
+**Background Playback Support**:
+- Integrated AVSession for notification bar and lock screen media controls
+- Added BackgroundTasks Kit integration for continuous background playback
+- System enforces AVSession requirement for background audio playback
+- Implemented media metadata updates (title, artist, duration)
+- Implemented real-time playback state updates (play/pause/progress)
+
+**Progress Synchronization Optimization**:
+- Reduced sync threshold from 2 seconds to 1 second for better synchronization
+- Unified sync threshold across car (AudioOutputController) and phone (VideoPlayer)
+- Immediate seek response when car drags progress bar
+
+**Network State Monitoring**:
+- Added connection state monitoring using Network Kit
+- Automatic pause on network loss
+- Auto-resume when network becomes available
+
+**State Cleanup**:
+- Complete state reset on stop command
+- URI cleanup on playback end
+- Proper resource release on app exit
+
+**HarmonyOS API Requirements** (Critical):
+```typescript
+// module.json5 必须配置
+{
+  "requestPermissions": [{
+    "name": "ohos.permission.KEEP_BACKGROUND_RUNNING",
+    "reason": "$string:background_reason",
+    "usedScene": { "abilities": ["EntryAbility"], "when": "always" }
+  }],
+  "abilities": [{
+    "name": "EntryAbility",
+    "backgroundModes": ["audioPlayback"]
+  }]
+}
+
+// 必须创建和激活AVSession
+avSession = await AVSessionManager.createAVSession(context, 'FSCastAudioSession', 'audio')
+await avSession.activate()
+
+// 必须设置元数据和播放状态
+await avSession.setAVMetadata({ assetId, title, artist, duration })
+await avSession.setAVPlaybackState({ state, position })
+
+// 必须申请长时任务
+await backgroundTaskManager.startBackgroundRunning(context, BackgroundMode.AUDIO_PLAYBACK, wantAgentObj)
+```
+
+**ArkTS Limitations**:
+- No `URL` class support - use string parsing for URL operations
+- No `any` or `unknown` types allowed
+- No `NetConnection.off()` method - listeners auto-cleanup
+- Limited PlaybackStrategy options
+
+**Key Files Modified**:
+- `companion-harmony/entry/src/main/ets/pages/Index.ets` - Added MediaSession integration
+- `companion-harmony/entry/src/main/ets/service/VideoPlayer.ets` - Optimized sync threshold and PlaybackStrategy
+- `app/src/main/java/com/example/floatingscreencasting/dlna/AudioOutputController.kt` - Updated sync threshold
+
 ## Completed Features
 
 ### ✅ Implemented
-- [x] DLNA DMR full implementation (SSDP, AvTransport, RenderingControl)
+- [x] DLNA DMR full implementation (SSDP, AvTransport, RenderingControl) - Car side only
 - [x] DLNA DMC client implementation (control other DLNA devices)
 - [x] Android Presentation API multi-screen display
 - [x] Jetpack Compose + Material 3 UI migration
@@ -485,10 +583,17 @@ B站App → [HTTP Headers] → FSCast DlnaHttpServer
 - [x] **Phone device discovery and management**
 - [x] **WebSocket communication between car and phone**
 - [x] **Synchronized startup flow (play_and_seek + resume)**
-- [x] **Progress synchronization (every 10 seconds, 2-second threshold)**
+- [x] **Progress synchronization (every 10 seconds, 1-second threshold)**
 - [x] **Disconnection protection (auto-pause on phone)**
+- [x] **HarmonyOS background playback (AVSession + BackgroundTasks)**
+- [x] **Notification bar and lock screen media controls**
+- [x] **Network state monitoring and auto-pause/resume**
+- [x] **Complete state cleanup on stop and playback end**
 - [x] **Thread safety improvements (ConcurrentHashMap)**
 - [x] **Code cleanup and quality improvements**
+- [x] **HarmonyOS UI refactoring (console-style, removed DLNA DMR from phone)**
+- [x] **Video URL display and copy/download functionality**
+- [x] **System Download directory integration**
 
 ### 🔬 Researched (Not Implemented)
 - [ ] Bluetooth audio output (system restriction - requires system-level whitelist)
@@ -514,11 +619,27 @@ B站App → [HTTP Headers] → FSCast DlnaHttpServer
 - Fixed ArkTS compiler errors in HarmonyOS app
 - Updated documentation
 
+### Recent Changes (v0.3.0-dev)
+- **HarmonyOS Background Playback**: Integrated AVSession and BackgroundTasks Kit
+- **Progress Sync Optimization**: Reduced threshold from 2s to 1s across both platforms
+- **Media Controls**: Added notification bar and lock screen media control support
+- **Network Monitoring**: Implemented connection state monitoring for network switching
+- **State Management**: Complete cleanup on stop/playback end
+- **Metadata Updates**: Real-time playback state and metadata updates
+- **UI Refactoring**: Console-style UI with collapsible status panel
+- **DLNA DMR Removal**: Removed DLNA DMR services from phone end (SSDP, HTTP server)
+- **WebSocket Only**: Phone now only communicates via WebSocket with car
+- **Video URL Features**: Added URL display, copy to clipboard, and download to system Download directory
+- **Component Architecture**: Created StatusPanel, VideoPlayerCard, VideoUrlCard, ControlPanel, CarIpDialog components
+- **Documentation**: Added comprehensive HarmonyOS development knowledge to skill (v2.1.0)
+
 ### Known Limitations
 - **Bluetooth Audio**: System restriction prevents third-party apps from using A2DP audio output on target hardware. Solved by pushing audio to phone via WebSocket.
 - **Display ID**: Hardcoded to `displayId = 2` for specific hardware. May need adjustment for different devices.
 - **Package Name**: Still uses `com.example.floatingscreencasting` (should be changed for production)
 - **Single Phone Support**: Currently only supports one phone connected at a time
+- **Phone UI**: Console-style UI optimized for technical users; may need simplification for general users
+- **Download Directory**: Requires `READ_WRITE_DOWNLOAD_DIRECTORY` permission for video downloads
 
 ### Future Enhancements
 - Change package name to production domain
@@ -528,3 +649,65 @@ B站App → [HTTP Headers] → FSCast DlnaHttpServer
 - Support more video formats
 - Improve error handling and user feedback
 - Add automatic device discovery without manual IP configuration
+
+## Testing Checklist
+
+### HarmonyOS Background Playback (v0.3.0-dev)
+
+#### Basic Functionality
+- [ ] Phone can connect to car via WebSocket
+- [ ] Video plays with correct HTTP headers (Bilibili anti-crawler)
+- [ ] Audio output switches between car speaker and phone
+
+#### Background Playback
+- [ ] Press Home key while playing - audio continues
+- [ ] Notification bar shows media control
+- [ ] Notification displays correct video title and duration
+- [ ] Lock screen shows media card
+- [ ] Lock screen controls work (play/pause/seek)
+- [ ] Playback state updates in real-time on controls
+
+#### Progress Synchronization
+- [ ] Car drags progress bar - phone syncs within 1 second
+- [ ] Progress difference < 1 second does not trigger sync
+- [ ] Progress difference > 1 second triggers seek
+- [ ] Car sends progress every 10 seconds
+- [ ] Phone correctly receives and processes progress updates
+
+#### State Cleanup
+- [ ] Car sends stop - phone clears URI and returns to idle
+- [ ] Video playback ends - both devices exit casting state
+- [ ] WebSocket disconnect - phone immediately pauses
+- [ ] App exit - all services properly released
+
+#### Network Handling
+- [ ] WiFi switch during playback - pauses or continues correctly
+- [ ] Network lost - playback pauses
+- [ ] Network recovered - playback resumes
+
+#### System Requirements
+- [ ] AVSession activated before playback
+- [ ] Long task requested when playback starts
+- [ ] Background modes configured in module.json5
+- [ ] KEEP_BACKGROUND_RUNNING permission granted
+
+## Development Resources
+
+### HarmonyOS Expert Knowledge
+- **Skill**: `harmonyos-expert.md` (v2.1.0)
+- **Location**: `C:\Users\weiwu\.claude\skills\harmonyos-expert.md`
+- **Coverage**: Media Kit, AVSession, BackgroundTasks, Network Kit, ArkUI, ArkTS
+
+### Key HarmonyOS Documentation
+1. Media Kit - Video/audio playback with AVPlayer
+2. AVSession - Background playback enforcement
+3. BackgroundTasks - Long-running background tasks
+4. Network Kit - Connection state monitoring
+5. Video Component - Simple video playback UI
+6. Streaming Media - HLS/HTTP-FLV/DASH support
+
+### Important Notes
+- **System Requirement**: Apps MUST use AVSession for background playback (enforced by system)
+- **Permission**: KEEP_BACKGROUND_RUNNING required for background audio
+- **Configuration**: backgroundModes must include "audioPlayback"
+- **ArkTS Limitations**: No URL class, no any/unknown types, limited API surface

@@ -27,6 +27,10 @@
     {
       "name": "background_reason",
       "value": "用于在后台持续播放来自车机的音频流"
+    },
+    {
+      "name": "download_reason",
+      "value": "用于下载视频文件到系统Download目录"
     }
   ]
 }

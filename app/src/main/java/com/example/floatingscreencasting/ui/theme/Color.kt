@@ -18,13 +18,13 @@ val OnSecondary = Color(0xFFFFFFFF)
 val SecondaryContainer = Color(0xFFFFD6E8)
 val OnSecondaryContainer = Color(0xFF31111D)
 
-// 背景色 - 更现代的深色背景
-val Background = Color(0xFF0F172A)     // Slate 900
-val OnBackground = Color(0xFFF1F5F9)   // Slate 100
+// 背景色 - 更现代的深色背景（增强对比度，提升强光下可读性）
+val Background = Color(0xFF0B1120)     // 更深的背景（Slate 950）
+val OnBackground = Color(0xFFF8FAFC)   // 更亮的文字（Slate 50）
 val Surface = Color(0xFF1E293B)        // Slate 800
-val OnSurface = Color(0xFFF1F5F9)
+val OnSurface = Color(0xFFF8FAFC)      // 更亮的表面文字
 val SurfaceVariant = Color(0xFF334155) // Slate 700
-val OnSurfaceVariant = Color(0xFF94A3B8) // Slate 400
+val OnSurfaceVariant = Color(0xFFCBD5E1) // 更亮的次要文字（Slate 300）
 
 // 状态色
 val Success = Color(0xFF10B981)        // Emerald 500
