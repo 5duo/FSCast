@@ -30,6 +30,7 @@ fun RightStatusPanel(
     phoneDeviceCount: Int,
     videoTitle: String,
     videoUrl: String,
+    isWebSocketServerRunning: Boolean,  // 新增参数
     onSeek: (Long) -> Unit,
     onRestartWebSocket: () -> Unit,
     onScanDevices: () -> Unit,
@@ -48,6 +49,7 @@ fun RightStatusPanel(
             isWindowVisible = isWindowVisible,
             audioOutputMode = audioOutputMode,
             phoneDeviceCount = phoneDeviceCount,
+            isWebSocketServerRunning = isWebSocketServerRunning,  // 新增参数
             onRestartWebSocket = onRestartWebSocket,
             onScanDevices = onScanDevices,
             modifier = Modifier.fillMaxWidth()

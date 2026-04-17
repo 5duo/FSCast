@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 背景色：黑金深色背景 -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#FF0B1120" />
+        </shape>
+    </item>
+
+    <!-- 启动图片（居中显示） -->
+    <item
+        android:width="400dp"
+        android:height="400dp"
+        android:gravity="center">
+        <bitmap
+            android:src="@drawable/splash_image"
+            android:gravity="center" />
+    </item>
+</layer-list>

@@ -47,6 +47,7 @@ import com.example.floatingscreencasting.ui.theme.FloatingScreenCastingTheme
 import com.example.floatingscreencasting.history.PlaybackHistoryManager
 import kotlinx.coroutines.launch
 import org.greenrobot.eventbus.EventBus
+import com.example.floatingscreencasting.R
 import org.greenrobot.eventbus.Subscribe
 import org.greenrobot.eventbus.ThreadMode
 
@@ -172,6 +173,9 @@ class ComposeMainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 不切换主题，保持启动主题让原生启动背景立即显示
+        // Compose UI会覆盖在上面
+
         super.onCreate(savedInstanceState)
 
         // 设置透明状态栏
@@ -181,15 +185,7 @@ class ComposeMainActivity : AppCompatActivity() {
 
         preferencesManager = PreferencesManager(this)
 
-        // 初始化音频输出控制器
-        initializeAudioOutputController()
-
-        initializeDisplays()
-        loadSettings()
-        initializeDlnaService()
-        updateContinueWatchingStatus()
-
-        // 注册广播接收器
+        // 注册广播接收器（轻量级操作，不会阻塞）
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
             registerReceiver(playbackErrorReceiver, IntentFilter("com.example.floatingscreencasting.PLAYBACK_ERROR"),
                 Context.RECEIVER_NOT_EXPORTED)
@@ -198,14 +194,11 @@ class ComposeMainActivity : AppCompatActivity() {
         }
         EventBus.getDefault().register(this)
 
-        // 启动进度更新（使用协程）
-        startProgressUpdate()
-
-        // 设置Compose UI
+        // 设置Compose UI（直接显示主界面）
         setContent {
             FloatingScreenCastingTheme(
-                darkTheme = true,      // 使用深色主题
-                modernDesign = true     // 启用现代设计
+                darkTheme = true,
+                modernDesign = true
             ) {
                 MainScreen(
                     uiState = uiState.value,
@@ -230,10 +223,31 @@ class ComposeMainActivity : AppCompatActivity() {
                     onContinueWatching = { continueWatching() },
                     onAudioOutputChange = { toggleAudioOutput() },
                     onScanDevices = { scanPhoneDevices() },
-                    onOpenSettingsPanel = { openAdjustmentPanel() },
-                    onCloseSettingsPanel = { closeAdjustmentPanel() }
+                    onOpenSettingsPanel = { showScreenSettingsDialog = true },
+                    onCloseSettingsPanel = { showScreenSettingsDialog = false }
                 )
             }
+        }
+
+        // 后台异步初始化所有服务
+        lifecycleScope.launch(Dispatchers.IO) {
+            // 初始化音频输出控制器
+            initializeAudioOutputController()
+
+            // 初始化显示器
+            initializeDisplays()
+
+            // 加载设置
+            loadSettings()
+
+            // 初始化DLNA服务
+            initializeDlnaService()
+
+            // 更新继续观看状态
+            updateContinueWatchingStatus()
+
+            // 启动进度更新
+            startProgressUpdate()
         }
     }
 
@@ -319,6 +333,7 @@ class ComposeMainActivity : AppCompatActivity() {
                     phoneDeviceCount = uiState.phoneDeviceCount,
                     videoTitle = uiState.currentVideoTitle,
                     videoUrl = uiState.currentVideoUrl,
+                    isWebSocketServerRunning = uiState.isWebSocketServerRunning,  // 新增参数
                     onSeek = onSeek,
                     onRestartWebSocket = { restartWebSocketServer() },
                     onScanDevices = onScanDevices,
@@ -1562,7 +1577,10 @@ data class MainUiState(
     val currentVideoUrl: String = "",
 
     // 悬浮窗启用状态
-    val isFloatingWindowEnabled: Boolean = true
+    val isFloatingWindowEnabled: Boolean = true,
+
+    // WebSocket服务器运行状态
+    val isWebSocketServerRunning: Boolean = true
 )
 
 // DisplayInfo已定义在com.example.floatingscreencasting.ui.composable包中

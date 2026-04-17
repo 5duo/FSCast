@@ -1,11 +1,12 @@
 package com.example.floatingscreencasting.ui.composable
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -23,10 +24,14 @@ fun StatusOverviewCard(
     isWindowVisible: Boolean,
     audioOutputMode: String,
     phoneDeviceCount: Int,
+    isWebSocketServerRunning: Boolean,  // 新增参数
     onRestartWebSocket: () -> Unit,
     onScanDevices: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // 对话框状态
+    var showRestartDialog by remember { mutableStateOf(false) }
+
     SectionCard(
         title = "状态概览",
         modifier = modifier
@@ -55,11 +60,13 @@ fun StatusOverviewCard(
                     modifier = Modifier.weight(1f)
                 )
 
-                ServiceControlUnit(
-                    imageVector = MaterialIconsRes.REFRESH,
-                    title = "重启服务",
-                    status = "WebSocket",
-                    onClick = onRestartWebSocket,
+                // WebSocket服务器状态（改为普通状态单元，点击可重启）
+                StatusUnit(
+                    imageVector = MaterialIconsRes.CONNECTION,
+                    title = "WebSocket服务",
+                    status = if (isWebSocketServerRunning) "运行中" else "已停止",
+                    isActive = isWebSocketServerRunning,
+                    onClick = { showRestartDialog = true },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -95,6 +102,44 @@ fun StatusOverviewCard(
             }
         }
     }
+
+    // 重启WebSocket服务确认对话框
+    if (showRestartDialog) {
+        AlertDialog(
+            onDismissRequest = { showRestartDialog = false },
+            title = {
+                Text(
+                    text = "重启WebSocket服务",
+                    color = GoldOnSurface,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "确定要重启WebSocket服务器吗？",
+                    color = GoldOnSurfaceVariant
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showRestartDialog = false
+                        onRestartWebSocket()
+                    }
+                ) {
+                    Text("确定", color = GoldPrimary)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showRestartDialog = false }
+                ) {
+                    Text("取消", color = GoldOnSurfaceVariant)
+                }
+            },
+            containerColor = GoldSurface
+        )
+    }
 }
 
 /**
@@ -106,10 +151,17 @@ private fun StatusUnit(
     title: String,
     status: String,
     isActive: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null  // 新增可选点击参数
 ) {
+    val backgroundModifier = if (onClick != null) {
+        modifier.clickable { onClick() }
+    } else {
+        modifier
+    }
+
     Surface(
-        modifier = modifier,
+        modifier = backgroundModifier,
         shape = RoundedCornerShape(8.dp),
         color = GoldSurfaceVariant.copy(alpha = 0.3f)
     ) {
