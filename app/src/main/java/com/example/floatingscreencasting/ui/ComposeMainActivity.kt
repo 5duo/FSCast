@@ -206,7 +206,7 @@ class ComposeMainActivity : AppCompatActivity() {
             ) {
                 MainScreen(
                     uiState = uiState.value,
-                    onToggleWindow = { toggleWindow() },
+                    onToggleWindow = { toggleFloatingWindow() },
                     onPlayPause = { togglePlayPause() },
                     onStop = { stop() },
                     onPrevious = { previous() },
@@ -226,7 +226,9 @@ class ComposeMainActivity : AppCompatActivity() {
                     onDisplayChange = { displayId -> changeDisplay(displayId) },
                     onContinueWatching = { continueWatching() },
                     onAudioOutputChange = { toggleAudioOutput() },
-                    onScanDevices = { scanPhoneDevices() }
+                    onScanDevices = { scanPhoneDevices() },
+                    onOpenAdjustmentPanel = { panelType -> openAdjustmentPanel(panelType) },
+                    onCloseAdjustmentPanel = { closeAdjustmentPanel() }
                 )
             }
         }
@@ -255,7 +257,9 @@ class ComposeMainActivity : AppCompatActivity() {
         onDisplayChange: (Int) -> Unit,
         onContinueWatching: () -> Unit,
         onAudioOutputChange: () -> Unit = {},
-        onScanDevices: () -> Unit = {}
+        onScanDevices: () -> Unit = {},
+        onOpenAdjustmentPanel: (AdjustmentPanelType) -> Unit = {},
+        onCloseAdjustmentPanel: () -> Unit = {}
     ) {
         Scaffold(
             topBar = {}  // 空的顶部栏
@@ -283,50 +287,51 @@ class ComposeMainActivity : AppCompatActivity() {
                     windowAlpha = uiState.windowAlpha,
                     selectedDisplayId = uiState.selectedDisplayId,
                     availableDisplays = uiState.availableDisplays,
+                    isFloatingWindowEnabled = uiState.isFloatingWindowEnabled,
                     onPlayPause = onPlayPause,
                     onStop = onStop,
                     onPrevious = onPrevious,
                     onNext = onNext,
                     onMute = onMute,
                     onAudioOutputChange = onAudioOutputChange,
+                    onToggleWindow = onToggleWindow,
                     onCenterClick = onCenterClick,
                     onMaximizeClick = onMaximizeClick,
                     onDefaultClick = onDefaultClick,
                     onCustomClick = onCustomClick,
-                    onAspectRatioChange = onAspectRatioChange,
-                    onPositionXChange = onPositionXChange,
-                    onPositionYChange = onPositionYChange,
-                    onSizeChange = onSizeChange,
-                    onHeightChange = onHeightChange,
-                    onAlphaChange = onAlphaChange,
                     onDisplayChange = onDisplayChange,
                     onRestartWebSocket = { restartWebSocketServer() },
-                    onScanDevices = onScanDevices
+                    onScanDevices = onScanDevices,
+                    onOpenSettingsPanel = { onOpenAdjustmentPanel(AdjustmentPanelType.SIZE) }
                 )
 
                 Spacer(modifier = Modifier.width(16.dp))
 
-                // 右侧状态显示区（自适应宽度）
+                // 右侧状态显示区（仅显示状态概览和播放信息）
                 RightStatusPanel(
                     isPlaying = uiState.isPlaying,
                     currentPosition = uiState.currentPosition,
                     duration = uiState.duration,
                     castingStatus = uiState.castingStatus,
                     isWindowVisible = uiState.isWindowVisible,
+                    audioOutputMode = uiState.audioOutputMode,
+                    phoneDeviceCount = uiState.phoneDeviceCount,
+                    onSeek = onSeek,
+                    activeAdjustmentPanel = uiState.activeAdjustmentPanel,
+                    aspectRatio = uiState.aspectRatio,
                     windowX = uiState.windowX,
                     windowY = uiState.windowY,
                     windowWidth = uiState.windowWidth,
                     windowHeight = uiState.windowHeight,
                     windowAlpha = uiState.windowAlpha,
-                    aspectRatio = uiState.aspectRatio,
-                    selectedDisplayId = uiState.selectedDisplayId,
-                    connectedPhoneDevice = uiState.connectedPhoneDevice,
-                    phoneDeviceCount = uiState.phoneDeviceCount,
-                    hasContinueWatching = uiState.hasContinueWatching,
-                    lastPlayedTitle = uiState.lastPlayedTitle,
-                    lastPlayedProgress = uiState.lastPlayedProgress,
-                    onSeek = onSeek,
-                    onContinueWatching = onContinueWatching
+                    onAspectRatioChange = onAspectRatioChange,
+                    onPositionXChange = onPositionXChange,
+                    onPositionYChange = onPositionYChange,
+                    onSizeChange = onSizeChange,
+                    onHeightChange = onHeightChange,
+                    onAlphaChange = onAlphaChange,
+                    onCloseAdjustmentPanel = onCloseAdjustmentPanel,
+                    modifier = Modifier.weight(1f)
                 )
             }
         }
@@ -356,6 +361,39 @@ class ComposeMainActivity : AppCompatActivity() {
                 videoPresentation = null
                 _uiState.value = uiState.value.copy(isWindowVisible = false)
             }
+        }
+    }
+
+    // ==================== 面板控制方法 ====================
+
+    /**
+     * 打开调整面板
+     */
+    private fun openAdjustmentPanel(panelType: AdjustmentPanelType) {
+        _uiState.value = uiState.value.copy(activeAdjustmentPanel = panelType)
+    }
+
+    /**
+     * 关闭调整面板
+     */
+    private fun closeAdjustmentPanel() {
+        _uiState.value = uiState.value.copy(activeAdjustmentPanel = null)
+    }
+
+    /**
+     * 切换悬浮窗启用状态
+     */
+    private fun toggleFloatingWindow() {
+        val newState = !uiState.value.isFloatingWindowEnabled
+        _uiState.value = uiState.value.copy(isFloatingWindowEnabled = newState)
+
+        // 控制悬浮窗显示/隐藏
+        if (newState) {
+            videoPresentation?.show()
+            _uiState.value = uiState.value.copy(isWindowVisible = true)
+        } else {
+            videoPresentation?.hide()
+            _uiState.value = uiState.value.copy(isWindowVisible = false)
         }
     }
 
@@ -1488,7 +1526,21 @@ data class MainUiState(
     val lastPlayedProgress: Int = 0,
     val audioOutputMode: String = "speaker",
     val connectedPhoneDevice: String? = null,
-    val phoneDeviceCount: Int = 0
+    val phoneDeviceCount: Int = 0,
+
+    // 动态调整面板状态
+    val activeAdjustmentPanel: AdjustmentPanelType? = null,
+    val isFloatingWindowEnabled: Boolean = true
 )
+
+/**
+ * 调整面板类型枚举
+ */
+enum class AdjustmentPanelType {
+    POSITION,       // 位置调整面板
+    SIZE,           // 大小调整面板
+    TRANSPARENCY,   // 透明度调整面板
+    ASPECT_RATIO    // 比例选择面板
+}
 
 // DisplayInfo已定义在com.example.floatingscreencasting.ui.composable包中

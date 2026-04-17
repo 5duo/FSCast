@@ -33,25 +33,22 @@ fun LeftOperationPanel(
     windowAlpha: Float,
     selectedDisplayId: Int,
     availableDisplays: List<DisplayInfo>,
+    isFloatingWindowEnabled: Boolean,
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onMute: () -> Unit,
     onAudioOutputChange: () -> Unit,
+    onToggleWindow: () -> Unit,
     onCenterClick: () -> Unit,
     onMaximizeClick: () -> Unit,
     onDefaultClick: () -> Unit,
     onCustomClick: () -> Unit,
-    onAspectRatioChange: (AspectRatio) -> Unit,
-    onPositionXChange: (Int) -> Unit,
-    onPositionYChange: (Int) -> Unit,
-    onSizeChange: (Int) -> Unit,
-    onHeightChange: (Int) -> Unit,
-    onAlphaChange: (Float) -> Unit,
     onDisplayChange: (Int) -> Unit,
     onRestartWebSocket: () -> Unit,
     onScanDevices: () -> Unit,
+    onOpenSettingsPanel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -61,7 +58,7 @@ fun LeftOperationPanel(
             .padding(start = 16.dp, top = 16.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. 播放控制区
+        // 1. 播放控制区（保持不变）
         PlaybackControlSection(
             isPlaying = isPlaying,
             isMuted = isMuted,
@@ -74,7 +71,27 @@ fun LeftOperationPanel(
             modifier = Modifier.fillMaxWidth()
         )
 
-        // 2. 快速操作区
+        // 2. 悬浮窗控制区（新重构）
+        FloatingWindowControlSection(
+            isFloatingWindowEnabled = isFloatingWindowEnabled,
+            windowX = windowX,
+            windowY = windowY,
+            windowWidth = windowWidth,
+            windowHeight = windowHeight,
+            windowAlpha = windowAlpha,
+            aspectRatio = aspectRatio,
+            selectedDisplayId = selectedDisplayId,
+            availableDisplays = availableDisplays,
+            onToggleWindow = onToggleWindow,
+            onDisplayChange = onDisplayChange,
+            onDefaultClick = onDefaultClick,
+            onMaximizeClick = onMaximizeClick,
+            onCustomClick = onCustomClick,
+            onOpenSettingsPanel = onOpenSettingsPanel,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        // 3. 快速操作区（从原Section 2移过来）
         QuickActionSection(
             onCenterClick = onCenterClick,
             onMaximizeClick = onMaximizeClick,
@@ -83,28 +100,8 @@ fun LeftOperationPanel(
             modifier = Modifier.fillMaxWidth()
         )
 
-        // 3. 窗口调整区
-        WindowAdjustSection(
-            aspectRatio = aspectRatio,
-            windowX = windowX,
-            windowY = windowY,
-            windowWidth = windowWidth,
-            windowHeight = windowHeight,
-            windowAlpha = windowAlpha,
-            onAspectRatioChange = onAspectRatioChange,
-            onPositionXChange = onPositionXChange,
-            onPositionYChange = onPositionYChange,
-            onSizeChange = onSizeChange,
-            onHeightChange = onHeightChange,
-            onAlphaChange = onAlphaChange,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        // 4. 服务控制区
+        // 4. 服务控制区（简化：移除屏幕选择）
         ServiceControlSection(
-            selectedDisplayId = selectedDisplayId,
-            availableDisplays = availableDisplays,
-            onDisplayChange = onDisplayChange,
             onRestartWebSocket = onRestartWebSocket,
             onScanDevices = onScanDevices,
             modifier = Modifier.fillMaxWidth()
@@ -140,7 +137,7 @@ private fun PlaybackControlSection(
             // 上一集
             ControlIconButton(
                 onClick = onPrevious,
-                icon = "⏮",
+                imageVector = MaterialIconsRes.SKIP_PREVIOUS,
                 contentDescription = "上一集",
                 size = 45.dp,
                 modifier = Modifier.size(45.dp)
@@ -151,7 +148,7 @@ private fun PlaybackControlSection(
             // 播放/暂停（中心大按钮）
             ControlIconButton(
                 onClick = onPlayPause,
-                icon = if (isPlaying) "⏸" else "▶",
+                imageVector = if (isPlaying) MaterialIconsRes.PAUSE else MaterialIconsRes.PLAY,
                 contentDescription = if (isPlaying) "暂停" else "播放",
                 size = 60.dp,
                 modifier = Modifier.size(60.dp),
@@ -163,7 +160,7 @@ private fun PlaybackControlSection(
             // 停止
             ControlIconButton(
                 onClick = onStop,
-                icon = "■",
+                imageVector = MaterialIconsRes.STOP,
                 contentDescription = "停止",
                 size = 50.dp,
                 modifier = Modifier.size(50.dp),
@@ -175,7 +172,7 @@ private fun PlaybackControlSection(
             // 下一集
             ControlIconButton(
                 onClick = onNext,
-                icon = "⏭",
+                imageVector = MaterialIconsRes.SKIP_NEXT,
                 contentDescription = "下一集",
                 size = 45.dp,
                 modifier = Modifier.size(45.dp)
@@ -193,7 +190,7 @@ private fun PlaybackControlSection(
             // 静音按钮
             ControlIconButton(
                 onClick = onMute,
-                icon = if (isMuted) "🔇" else "🔊",
+                imageVector = if (isMuted) MaterialIconsRes.VOLUME_MUTE else MaterialIconsRes.VOLUME_UP,
                 contentDescription = if (isMuted) "取消静音" else "静音",
                 size = 40.dp,
                 modifier = Modifier.size(40.dp)
@@ -252,28 +249,28 @@ private fun QuickActionSection(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             QuickActionButton(
-                icon = "🎯",
+                imageVector = MaterialIconsRes.ALIGN_CENTER,
                 label = "居中",
                 onClick = onCenterClick,
                 modifier = Modifier.weight(1f)
             )
 
             QuickActionButton(
-                icon = "📐",
+                imageVector = MaterialIconsRes.FULL_SCREEN,
                 label = "最大化",
                 onClick = onMaximizeClick,
                 modifier = Modifier.weight(1f)
             )
 
             QuickActionButton(
-                icon = "💾",
+                imageVector = MaterialIconsRes.SAVE,
                 label = "保存",
                 onClick = onCustomClick,
                 modifier = Modifier.weight(1f)
             )
 
             QuickActionButton(
-                icon = "🔄",
+                imageVector = MaterialIconsRes.REFRESH,
                 label = "默认",
                 onClick = onDefaultClick,
                 modifier = Modifier.weight(1f)
@@ -333,7 +330,7 @@ private fun WindowAdjustSection(
 
         // 大小滑块
         ModernSliderRow(
-            icon = "📏",
+            imageVector = MaterialIconsRes.RESIZE,
             label = "窗口大小",
             value = windowWidth,
             valueRange = 240..1920,
@@ -346,7 +343,7 @@ private fun WindowAdjustSection(
 
         // 位置X滑块
         ModernSliderRow(
-            icon = "↔️",
+            imageVector = MaterialIconsRes.ALIGN_HORIZONTAL,
             label = "水平位置",
             value = windowX,
             valueRange = 0..1920,
@@ -359,7 +356,7 @@ private fun WindowAdjustSection(
 
         // 位置Y滑块
         ModernSliderRow(
-            icon = "↕️",
+            imageVector = MaterialIconsRes.ALIGN_VERTICAL,
             label = "垂直位置",
             value = windowY,
             valueRange = 0..720,
@@ -372,7 +369,7 @@ private fun WindowAdjustSection(
 
         // 透明度滑块
         ModernSliderRow(
-            icon = "🔆",
+            imageVector = MaterialIconsRes.VISIBILITY,
             label = "透明度",
             value = (windowAlpha * 100).toInt(),
             valueRange = 10..100,
@@ -384,13 +381,10 @@ private fun WindowAdjustSection(
 }
 
 /**
- * 服务控制区（200dp高）
+ * 服务控制区（简化版）
  */
 @Composable
 private fun ServiceControlSection(
-    selectedDisplayId: Int,
-    availableDisplays: List<DisplayInfo>,
-    onDisplayChange: (Int) -> Unit,
     onRestartWebSocket: () -> Unit,
     onScanDevices: () -> Unit,
     modifier: Modifier = Modifier
@@ -404,7 +398,7 @@ private fun ServiceControlSection(
         ) {
             // 重启WebSocket服务按钮
             ServiceActionButton(
-                icon = "🔌",
+                imageVector = MaterialIconsRes.REFRESH,
                 label = "重启WebSocket服务",
                 onClick = onRestartWebSocket,
                 modifier = Modifier.fillMaxWidth()
@@ -412,90 +406,11 @@ private fun ServiceControlSection(
 
             // 扫描手机设备按钮
             ServiceActionButton(
-                icon = "🔍",
+                imageVector = MaterialIconsRes.SCAN,
                 label = "扫描手机设备",
                 onClick = onScanDevices,
                 modifier = Modifier.fillMaxWidth()
             )
-
-            // 屏幕选择下拉菜单
-            var expanded by remember { mutableStateOf(false) }
-
-            Text(
-                text = "投屏屏幕",
-                style = MaterialTheme.typography.bodySmall,
-                color = GoldOnSurfaceVariant,
-                fontSize = 14.sp
-            )
-
-            Box(modifier = Modifier.fillMaxWidth()) {
-                Surface(
-                    onClick = { expanded = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    color = GoldSurfaceVariant
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "🖥️",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontSize = 16.sp
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = availableDisplays.find { it.id == selectedDisplayId }?.name ?: "Display $selectedDisplayId",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = GoldOnSurface
-                            )
-                        }
-                        Text(
-                            text = "▼",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = GoldOnSurfaceVariant
-                        )
-                    }
-                }
-
-                DropdownMenu(
-                    expanded = expanded,
-                    onDismissRequest = { expanded = false },
-                    modifier = Modifier
-                        .background(GoldSurface, RoundedCornerShape(8.dp))
-                        .width(300.dp)
-                ) {
-                    availableDisplays.forEach { display ->
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    display.name,
-                                    color = GoldOnSurface
-                                )
-                            },
-                            onClick = {
-                                onDisplayChange(display.id)
-                                expanded = false
-                            },
-                            leadingIcon = {
-                                if (display.id == selectedDisplayId) {
-                                    Text(
-                                        text = "✓",
-                                        color = GoldPrimary
-                                    )
-                                }
-                            }
-                        )
-                    }
-                }
-            }
         }
     }
 }
@@ -535,12 +450,12 @@ private fun SectionCard(
 }
 
 /**
- * 控制图标按钮
+ * 控制图标按钮（使用Material Icons）
  */
 @Composable
 private fun ControlIconButton(
     onClick: () -> Unit,
-    icon: String,
+    imageVector: androidx.compose.ui.graphics.vector.ImageVector,
     contentDescription: String?,
     size: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier,
@@ -556,21 +471,22 @@ private fun ControlIconButton(
             contentAlignment = Alignment.Center,
             modifier = Modifier.fillMaxSize()
         ) {
-            Text(
-                text = icon,
-                fontSize = (size.value * 0.4).toInt().sp,
-                color = GoldOnSurface
+            MaterialIcon(
+                imageVector = imageVector,
+                contentDescription = contentDescription,
+                iconSize = size * 0.5f,
+                tint = GoldOnSurface
             )
         }
     }
 }
 
 /**
- * 快速操作按钮
+ * 快速操作按钮（使用Material Icons）
  */
 @Composable
 private fun QuickActionButton(
-    icon: String,
+    imageVector: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -588,10 +504,11 @@ private fun QuickActionButton(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text(
-                text = icon,
-                style = MaterialTheme.typography.titleMedium,
-                fontSize = 24.sp
+            MaterialIcon(
+                imageVector = imageVector,
+                contentDescription = label,
+                iconSize = 24.dp,
+                tint = GoldOnSurface
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
@@ -599,6 +516,280 @@ private fun QuickActionButton(
                 style = MaterialTheme.typography.bodySmall,
                 color = GoldOnSurfaceVariant,
                 fontSize = 12.sp
+            )
+        }
+    }
+}
+
+/**
+ * 悬浮窗控制区（新重构）
+ */
+@Composable
+private fun FloatingWindowControlSection(
+    isFloatingWindowEnabled: Boolean,
+    windowX: Int,
+    windowY: Int,
+    windowWidth: Int,
+    windowHeight: Int,
+    windowAlpha: Float,
+    aspectRatio: AspectRatio,
+    selectedDisplayId: Int,
+    availableDisplays: List<DisplayInfo>,
+    onToggleWindow: () -> Unit,
+    onDisplayChange: (Int) -> Unit,
+    onDefaultClick: () -> Unit,
+    onMaximizeClick: () -> Unit,
+    onCustomClick: () -> Unit,
+    onOpenSettingsPanel: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    SectionCard(
+        title = "悬浮窗控制",
+        modifier = modifier
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // 悬浮窗开关
+            WindowToggleButton(
+                isEnabled = isFloatingWindowEnabled,
+                onToggle = onToggleWindow
+            )
+
+            // 屏幕选择下拉菜单
+            ScreenSelectorDropdown(
+                selectedDisplayId = selectedDisplayId,
+                availableDisplays = availableDisplays,
+                onDisplayChange = onDisplayChange
+            )
+
+            // 快捷操作按钮组
+            AdjustmentPanelButtons(
+                onDefaultClick = onDefaultClick,
+                onMaximizeClick = onMaximizeClick,
+                onCustomClick = onCustomClick
+            )
+
+            // 屏幕设置按钮
+            ScreenSettingsButton(
+                onClick = onOpenSettingsPanel
+            )
+        }
+    }
+}
+
+/**
+ * 悬浮窗开关按钮
+ */
+@Composable
+private fun WindowToggleButton(
+    isEnabled: Boolean,
+    onToggle: () -> Unit
+) {
+    Surface(
+        onClick = onToggle,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = if (isEnabled) {
+            GoldPrimary.copy(alpha = 0.8f)
+        } else {
+            GoldSurfaceVariant.copy(alpha = 0.5f)
+        }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Start
+        ) {
+            MaterialIcon(
+                imageVector = if (isEnabled) MaterialIconsRes.VISIBILITY else MaterialIconsRes.DELETE,
+                contentDescription = if (isEnabled) "悬浮窗已启用" else "悬浮窗已禁用",
+                iconSize = 18.dp,
+                tint = if (isEnabled) OnGold else GoldOnSurface
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = if (isEnabled) "悬浮窗已启用" else "悬浮窗已禁用",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isEnabled) OnGold else GoldOnSurface,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+/**
+ * 屏幕选择下拉菜单
+ */
+@Composable
+private fun ScreenSelectorDropdown(
+    selectedDisplayId: Int,
+    availableDisplays: List<DisplayInfo>,
+    onDisplayChange: (Int) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Text(
+        text = "投屏屏幕",
+        style = MaterialTheme.typography.bodySmall,
+        color = GoldOnSurfaceVariant,
+        fontSize = 14.sp
+    )
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Surface(
+            onClick = { expanded = true },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+            color = GoldSurfaceVariant
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    MaterialIcon(
+                        imageVector = MaterialIconsRes.DISPLAY,
+                        contentDescription = "投屏屏幕",
+                        iconSize = 16.dp,
+                        tint = GoldOnSurface
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Display $selectedDisplayId",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = GoldOnSurface
+                    )
+                }
+                MaterialIcon(
+                    imageVector = MaterialIconsRes.DOWN,
+                    contentDescription = "展开",
+                    iconSize = 14.dp,
+                    tint = GoldOnSurfaceVariant
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier
+                .background(GoldSurface, RoundedCornerShape(8.dp))
+                .width(300.dp)
+        ) {
+            availableDisplays.forEach { display ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            "Display ${display.id}",
+                            color = GoldOnSurface
+                        )
+                    },
+                    onClick = {
+                        onDisplayChange(display.id)
+                        expanded = false
+                    },
+                    leadingIcon = {
+                        if (display.id == selectedDisplayId) {
+                            MaterialIcon(
+                                imageVector = MaterialIconsRes.CHECK,
+                                contentDescription = "已选中",
+                                iconSize = 16.dp,
+                                tint = GoldPrimary
+                            )
+                        }
+                    }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 快捷操作按钮组（替换详细调整面板）
+ */
+@Composable
+private fun AdjustmentPanelButtons(
+    onDefaultClick: () -> Unit,
+    onMaximizeClick: () -> Unit,
+    onCustomClick: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = "快捷设置",
+            style = MaterialTheme.typography.bodySmall,
+            color = GoldOnSurfaceVariant,
+            fontSize = 14.sp
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            QuickActionButton(
+                imageVector = MaterialIconsRes.REFRESH,
+                label = "默认",
+                onClick = onDefaultClick,
+                modifier = Modifier.weight(1f)
+            )
+            QuickActionButton(
+                imageVector = MaterialIconsRes.FULL_SCREEN,
+                label = "最大化",
+                onClick = onMaximizeClick,
+                modifier = Modifier.weight(1f)
+            )
+            QuickActionButton(
+                imageVector = MaterialIconsRes.SAVE,
+                label = "自定义",
+                onClick = onCustomClick,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+/**
+ * 调整按钮（使用Material Icons）
+ */
+@Composable
+private fun AdjustmentButton(
+    imageVector: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier.height(50.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = GoldSurfaceVariant.copy(alpha = 0.5f)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            MaterialIcon(
+                imageVector = imageVector,
+                contentDescription = label,
+                iconSize = 16.dp,
+                tint = GoldOnSurface
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodySmall,
+                color = GoldOnSurface,
+                fontSize = 13.sp
             )
         }
     }
@@ -650,11 +841,51 @@ private fun AspectRatioButton(
 }
 
 /**
- * 服务操作按钮
+ * 屏幕设置按钮
+ */
+@Composable
+private fun ScreenSettingsButton(
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp),
+        shape = RoundedCornerShape(8.dp),
+        color = GoldSurfaceVariant.copy(alpha = 0.5f)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Start
+        ) {
+            MaterialIcon(
+                imageVector = MaterialIconsRes.SETTINGS,
+                contentDescription = "屏幕设置",
+                iconSize = 18.dp,
+                tint = GoldOnSurface
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = "屏幕设置",
+                style = MaterialTheme.typography.bodyMedium,
+                color = GoldOnSurface,
+                fontWeight = FontWeight.Medium,
+                fontSize = 15.sp
+            )
+        }
+    }
+}
+
+/**
+ * 服务操作按钮（使用Material Icons）
  */
 @Composable
 private fun ServiceActionButton(
-    icon: String,
+    imageVector: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -672,10 +903,11 @@ private fun ServiceActionButton(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Start
         ) {
-            Text(
-                text = icon,
-                style = MaterialTheme.typography.bodyMedium,
-                fontSize = 18.sp
+            MaterialIcon(
+                imageVector = imageVector,
+                contentDescription = label,
+                iconSize = 18.dp,
+                tint = GoldOnSurface
             )
             Spacer(modifier = Modifier.width(12.dp))
             Text(

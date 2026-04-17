@@ -115,6 +115,9 @@ dependencies {
     // Java-WebSocket (WebSocket服务器)
     implementation("org.java-websocket:Java-WebSocket:1.5.4")
 
+    // Material Design Icons Extended
+    implementation("androidx.compose.material:material-icons-extended:1.7.6")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
