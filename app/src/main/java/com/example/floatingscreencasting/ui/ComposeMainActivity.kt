@@ -266,79 +266,68 @@ class ComposeMainActivity : AppCompatActivity() {
                     .padding(paddingValues)
                     .padding(top = 70.dp, bottom = 16.dp)
             ) {
-                // 左侧彩蛋面板（150dp留白区域）
-                EasterEggPanel(
+                // 左侧150dp留白区域（车机导航栏遮挡）
+                Spacer(modifier = Modifier.width(150.dp))
+
+                // 左侧操作区（400dp宽）
+                LeftOperationPanel(
+                    isPlaying = uiState.isPlaying,
+                    isMuted = uiState.isMuted,
+                    currentPosition = uiState.currentPosition,
+                    duration = uiState.duration,
+                    aspectRatio = uiState.aspectRatio,
+                    windowX = uiState.windowX,
+                    windowY = uiState.windowY,
+                    windowWidth = uiState.windowWidth,
+                    windowHeight = uiState.windowHeight,
+                    windowAlpha = uiState.windowAlpha,
+                    selectedDisplayId = uiState.selectedDisplayId,
+                    availableDisplays = uiState.availableDisplays,
+                    onPlayPause = onPlayPause,
+                    onStop = onStop,
+                    onPrevious = onPrevious,
+                    onNext = onNext,
+                    onMute = onMute,
+                    onAudioOutputChange = onAudioOutputChange,
+                    onCenterClick = onCenterClick,
+                    onMaximizeClick = onMaximizeClick,
+                    onDefaultClick = onDefaultClick,
+                    onCustomClick = onCustomClick,
+                    onAspectRatioChange = onAspectRatioChange,
+                    onPositionXChange = onPositionXChange,
+                    onPositionYChange = onPositionYChange,
+                    onSizeChange = onSizeChange,
+                    onHeightChange = onHeightChange,
+                    onAlphaChange = onAlphaChange,
+                    onDisplayChange = onDisplayChange,
+                    onRestartWebSocket = { restartWebSocketServer() },
+                    onScanDevices = onScanDevices
+                )
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                // 右侧状态显示区（自适应宽度）
+                RightStatusPanel(
                     isPlaying = uiState.isPlaying,
                     currentPosition = uiState.currentPosition,
                     duration = uiState.duration,
-                    appVersion = "v0.3.1",
-                    onPlayPause = onPlayPause
+                    castingStatus = uiState.castingStatus,
+                    isWindowVisible = uiState.isWindowVisible,
+                    windowX = uiState.windowX,
+                    windowY = uiState.windowY,
+                    windowWidth = uiState.windowWidth,
+                    windowHeight = uiState.windowHeight,
+                    windowAlpha = uiState.windowAlpha,
+                    aspectRatio = uiState.aspectRatio,
+                    selectedDisplayId = uiState.selectedDisplayId,
+                    connectedPhoneDevice = uiState.connectedPhoneDevice,
+                    phoneDeviceCount = uiState.phoneDeviceCount,
+                    hasContinueWatching = uiState.hasContinueWatching,
+                    lastPlayedTitle = uiState.lastPlayedTitle,
+                    lastPlayedProgress = uiState.lastPlayedProgress,
+                    onSeek = onSeek,
+                    onContinueWatching = onContinueWatching
                 )
-
-                // 主内容区域
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 20.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(20.dp)
-                ) {
-                    // 顶部状态栏 - 整合所有核心状态
-                    TopStatusBar(
-                        castingStatus = uiState.castingStatus,
-                        isPlaying = uiState.isPlaying,
-                        audioOutputMode = uiState.audioOutputMode,
-                        isPhoneConnected = uiState.connectedPhoneDevice != null,
-                        phoneDeviceCount = uiState.phoneDeviceCount,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    // 主控制网格 - 视频预览 + 大按钮播放控制
-                    MainControlGrid(
-                        isPlaying = uiState.isPlaying,
-                        isMuted = uiState.isMuted,
-                        currentAudioOutput = uiState.currentAudioOutput,
-                        castingStatus = uiState.castingStatus,
-                        onPlayPause = onPlayPause,
-                        onStop = onStop,
-                        onMute = onMute,
-                        onAudioOutputChange = onAudioOutputChange,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    // 继续观看卡片（如果有可继续观看的内容）
-                    if (uiState.hasContinueWatching) {
-                        ContinueWatchingCard(
-                            hasContinueWatching = uiState.hasContinueWatching,
-                            title = uiState.lastPlayedTitle,
-                            progress = uiState.lastPlayedProgress,
-                            onContinueWatching = onContinueWatching,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-
-                    // 快捷设置网格
-                    QuickSettingsGrid(
-                        onRestartWebSocket = { restartWebSocketServer() },
-                        onCenterWindow = { centerWindow() },
-                        onMaximizeWindow = { maximizeWindow() },
-                        onResetWindow = { restoreDefault() },
-                        onOpenSettings = {
-                            // 设置卡片作为后备选项
-                            // 在实际应用中可以打开单独的设置页面
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    // 底部信息
-                    Text(
-                        text = "🎬 DLNA投屏接收器",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.fillMaxWidth(),
-                        textAlign = TextAlign.Center
-                    )
-                }
             }
         }
     }

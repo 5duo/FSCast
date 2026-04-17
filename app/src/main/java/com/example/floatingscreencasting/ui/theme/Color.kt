@@ -61,3 +61,22 @@ val ios_blue = Color(0xFF007AFF)
 val ios_red = Color(0xFFFF3B30)
 val ios_green = Color(0xFF34C759)
 val ios_orange = Color(0xFFFF9500)
+
+// ==================== 黑金配色方案 ====================
+
+// 黑色系（背景）
+val GoldBackground = Color(0xFF0B1120)        // 深黑背景
+val GoldSurface = Color(0xFF1A1A2E)           // 卡片背景
+val GoldSurfaceVariant = Color(0xFF252540)    // 次要表面
+
+// 金色系（强调色）
+val GoldPrimary = Color(0xFFD4AF37)           // 主金色
+val GoldLight = Color(0xFFE5C558)             // 浅金色
+val GoldDark = Color(0xFFB8941F)              // 深金色
+val OnGold = Color(0xFF0B1120)                // 金色上的文字
+
+// 文字颜色
+val GoldOnBackground = Color(0xFFF5F5F5)      // 主文字（白金色）
+val GoldOnSurface = Color(0xFFE8E8E8)         // 表面文字
+val GoldOnSurfaceVariant = Color(0xFFA0A0A0)  // 次要文字（灰色）
+val GoldText = Color(0xFFD4AF37)              // 金色强调文字
