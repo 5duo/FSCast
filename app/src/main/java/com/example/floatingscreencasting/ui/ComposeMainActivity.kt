@@ -82,6 +82,9 @@ class ComposeMainActivity : AppCompatActivity() {
     private var progressUpdateJob: Job? = null
     private val progressUpdateScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
+    // 屏幕设置弹窗状态
+    private var showScreenSettingsDialog by mutableStateOf(false)
+
     // 自定义配置存储
     private data class CustomConfig(
         val x: Int = 429,
@@ -227,8 +230,8 @@ class ComposeMainActivity : AppCompatActivity() {
                     onContinueWatching = { continueWatching() },
                     onAudioOutputChange = { toggleAudioOutput() },
                     onScanDevices = { scanPhoneDevices() },
-                    onOpenAdjustmentPanel = { panelType -> openAdjustmentPanel(panelType) },
-                    onCloseAdjustmentPanel = { closeAdjustmentPanel() }
+                    onOpenSettingsPanel = { openAdjustmentPanel() },
+                    onCloseSettingsPanel = { closeAdjustmentPanel() }
                 )
             }
         }
@@ -258,8 +261,8 @@ class ComposeMainActivity : AppCompatActivity() {
         onContinueWatching: () -> Unit,
         onAudioOutputChange: () -> Unit = {},
         onScanDevices: () -> Unit = {},
-        onOpenAdjustmentPanel: (AdjustmentPanelType) -> Unit = {},
-        onCloseAdjustmentPanel: () -> Unit = {}
+        onOpenSettingsPanel: () -> Unit = {},
+        onCloseSettingsPanel: () -> Unit = {}
     ) {
         Scaffold(
             topBar = {}  // 空的顶部栏
@@ -302,7 +305,7 @@ class ComposeMainActivity : AppCompatActivity() {
                     onDisplayChange = onDisplayChange,
                     onRestartWebSocket = { restartWebSocketServer() },
                     onScanDevices = onScanDevices,
-                    onOpenSettingsPanel = { onOpenAdjustmentPanel(AdjustmentPanelType.SIZE) }
+                    onOpenSettingsPanel = { showScreenSettingsDialog = true }
                 )
 
                 Spacer(modifier = Modifier.width(16.dp))
@@ -316,25 +319,31 @@ class ComposeMainActivity : AppCompatActivity() {
                     isWindowVisible = uiState.isWindowVisible,
                     audioOutputMode = uiState.audioOutputMode,
                     phoneDeviceCount = uiState.phoneDeviceCount,
+                    videoTitle = uiState.currentVideoTitle,
+                    videoUrl = uiState.currentVideoUrl,
                     onSeek = onSeek,
-                    activeAdjustmentPanel = uiState.activeAdjustmentPanel,
-                    aspectRatio = uiState.aspectRatio,
-                    windowX = uiState.windowX,
-                    windowY = uiState.windowY,
-                    windowWidth = uiState.windowWidth,
-                    windowHeight = uiState.windowHeight,
-                    windowAlpha = uiState.windowAlpha,
-                    onAspectRatioChange = onAspectRatioChange,
-                    onPositionXChange = onPositionXChange,
-                    onPositionYChange = onPositionYChange,
-                    onSizeChange = onSizeChange,
-                    onHeightChange = onHeightChange,
-                    onAlphaChange = onAlphaChange,
-                    onCloseAdjustmentPanel = onCloseAdjustmentPanel,
                     modifier = Modifier.weight(1f)
                 )
             }
         }
+
+        // 屏幕设置弹窗
+        ScreenSettingsDialog(
+            isVisible = showScreenSettingsDialog,
+            aspectRatio = uiState.aspectRatio,
+            windowX = uiState.windowX,
+            windowY = uiState.windowY,
+            windowWidth = uiState.windowWidth,
+            windowHeight = uiState.windowHeight,
+            windowAlpha = uiState.windowAlpha,
+            onAspectRatioChange = onAspectRatioChange,
+            onPositionXChange = onPositionXChange,
+            onPositionYChange = onPositionYChange,
+            onSizeChange = onSizeChange,
+            onHeightChange = onHeightChange,
+            onAlphaChange = onAlphaChange,
+            onDismiss = { showScreenSettingsDialog = false }
+        )
     }
 
     // ==================== 控制方法 ====================
@@ -369,15 +378,15 @@ class ComposeMainActivity : AppCompatActivity() {
     /**
      * 打开调整面板
      */
-    private fun openAdjustmentPanel(panelType: AdjustmentPanelType) {
-        _uiState.value = uiState.value.copy(activeAdjustmentPanel = panelType)
+    private fun openAdjustmentPanel() {
+        showScreenSettingsDialog = true
     }
 
     /**
      * 关闭调整面板
      */
     private fun closeAdjustmentPanel() {
-        _uiState.value = uiState.value.copy(activeAdjustmentPanel = null)
+        showScreenSettingsDialog = false
     }
 
     /**
@@ -1186,8 +1195,14 @@ class ComposeMainActivity : AppCompatActivity() {
                         videoPresentation?.playMedia(uri)
                         if (uri.isNotEmpty()) {
                             dlnaService.updateTransportState("PLAYING")
-                            // 播放开始
-                            _uiState.value = uiState.value.copy(isPlaying = true)
+                            // 提取视频标题
+                            val title = extractVideoTitle(uri)
+                            // 播放开始，更新视频信息
+                            _uiState.value = uiState.value.copy(
+                                isPlaying = true,
+                                currentVideoUrl = uri,
+                                currentVideoTitle = title
+                            )
                         }
                     } catch (e: Exception) {
                         Log.e("ComposeMainActivity", "播放视频失败", e)
@@ -1444,6 +1459,20 @@ class ComposeMainActivity : AppCompatActivity() {
         return display.displayId == drivingDisplayId
     }
 
+    /**
+     * 从视频URI中提取标题
+     */
+    private fun extractVideoTitle(uri: String): String {
+        return when {
+            uri.contains("bilibili") -> "哔哩哔哩"
+            uri.contains("iqiyi") -> "爱奇艺"
+            uri.contains("v.qq.com") -> "腾讯视频"
+            uri.contains("youku") -> "优酷"
+            uri.contains("mgtv") -> "芒果TV"
+            else -> "在线视频"
+        }
+    }
+
     private fun isPresentationDisplay(display: Display): Boolean {
         // 如果设备只有一个屏幕，允许使用内置屏幕
         val displays = displayManager.displays
@@ -1528,19 +1557,12 @@ data class MainUiState(
     val connectedPhoneDevice: String? = null,
     val phoneDeviceCount: Int = 0,
 
-    // 动态调整面板状态
-    val activeAdjustmentPanel: AdjustmentPanelType? = null,
+    // 当前播放视频信息
+    val currentVideoTitle: String = "",
+    val currentVideoUrl: String = "",
+
+    // 悬浮窗启用状态
     val isFloatingWindowEnabled: Boolean = true
 )
-
-/**
- * 调整面板类型枚举
- */
-enum class AdjustmentPanelType {
-    POSITION,       // 位置调整面板
-    SIZE,           // 大小调整面板
-    TRANSPARENCY,   // 透明度调整面板
-    ASPECT_RATIO    // 比例选择面板
-}
 
 // DisplayInfo已定义在com.example.floatingscreencasting.ui.composable包中

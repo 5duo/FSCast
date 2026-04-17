@@ -14,10 +14,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.floatingscreencasting.ui.theme.*
-import com.example.floatingscreencasting.ui.AdjustmentPanelType
 
 /**
- * 右侧状态显示区容器（简化版 - 仅显示状态概览和播放信息）
+ * 右侧状态显示区容器
+ * 使用固定高度确保播放信息卡片底部与左侧悬浮窗控制卡片底部对齐
  */
 @Composable
 fun RightStatusPanel(
@@ -28,30 +28,16 @@ fun RightStatusPanel(
     isWindowVisible: Boolean,
     audioOutputMode: String,
     phoneDeviceCount: Int,
+    videoTitle: String,
+    videoUrl: String,
     onSeek: (Long) -> Unit,
-    activeAdjustmentPanel: AdjustmentPanelType?,
-    aspectRatio: AspectRatio,
-    windowX: Int,
-    windowY: Int,
-    windowWidth: Int,
-    windowHeight: Int,
-    windowAlpha: Float,
-    onAspectRatioChange: (AspectRatio) -> Unit,
-    onPositionXChange: (Int) -> Unit,
-    onPositionYChange: (Int) -> Unit,
-    onSizeChange: (Int) -> Unit,
-    onHeightChange: (Int) -> Unit,
-    onAlphaChange: (Float) -> Unit,
-    onCloseAdjustmentPanel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val scrollState = rememberScrollState()
-
+    // 使用简单Column结构，固定高度控制
     Column(
         modifier = modifier
             .fillMaxHeight()
-            .padding(end = 16.dp, top = 16.dp, bottom = 16.dp)
-            .verticalScroll(scrollState),
+            .padding(end = 16.dp, top = 16.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // 1. 状态概览卡片
@@ -63,33 +49,18 @@ fun RightStatusPanel(
             modifier = Modifier.fillMaxWidth()
         )
 
-        // 2. 播放信息区
+        // 2. 播放信息卡片 - 固定高度283dp
         PlaybackInfoSection(
             isPlaying = isPlaying,
             currentPosition = currentPosition,
             duration = duration,
             castingStatus = castingStatus,
+            videoTitle = videoTitle,
+            videoUrl = videoUrl,
             onSeek = onSeek,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        // 3. 动态调整面板
-        DynamicAdjustmentPanel(
-            panelType = activeAdjustmentPanel,
-            aspectRatio = aspectRatio,
-            windowX = windowX,
-            windowY = windowY,
-            windowWidth = windowWidth,
-            windowHeight = windowHeight,
-            windowAlpha = windowAlpha,
-            onAspectRatioChange = onAspectRatioChange,
-            onPositionXChange = onPositionXChange,
-            onPositionYChange = onPositionYChange,
-            onSizeChange = onSizeChange,
-            onHeightChange = onHeightChange,
-            onAlphaChange = onAlphaChange,
-            onClose = onCloseAdjustmentPanel,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(283.dp)
         )
     }
 }

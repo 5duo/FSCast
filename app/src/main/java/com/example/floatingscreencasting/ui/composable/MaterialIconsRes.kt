@@ -37,6 +37,7 @@ object MaterialIconsRes {
 
     // 服务控制
     val SCAN = Icons.Filled.QrCodeScanner
+    val QR_CODE = Icons.Filled.QrCode
     val RESTART = Icons.Filled.RestartAlt
 
     // 位置滑块

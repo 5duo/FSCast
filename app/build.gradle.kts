@@ -118,6 +118,9 @@ dependencies {
     // Material Design Icons Extended
     implementation("androidx.compose.material:material-icons-extended:1.7.6")
 
+    // ZXing (二维码生成)
+    implementation("com.google.zxing:core:3.5.2")
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
