@@ -15,7 +15,7 @@ import com.example.floatingscreencasting.ui.theme.*
 
 /**
  * 状态概览卡片
- * 2x2网格显示核心状态信息
+ * 2x3网格显示核心状态信息和服务控制按钮
  */
 @Composable
 fun StatusOverviewCard(
@@ -23,6 +23,8 @@ fun StatusOverviewCard(
     isWindowVisible: Boolean,
     audioOutputMode: String,
     phoneDeviceCount: Int,
+    onRestartWebSocket: () -> Unit,
+    onScanDevices: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     SectionCard(
@@ -52,6 +54,14 @@ fun StatusOverviewCard(
                     isActive = isPlaying,
                     modifier = Modifier.weight(1f)
                 )
+
+                ServiceControlUnit(
+                    imageVector = MaterialIconsRes.REFRESH,
+                    title = "重启服务",
+                    status = "WebSocket",
+                    onClick = onRestartWebSocket,
+                    modifier = Modifier.weight(1f)
+                )
             }
 
             // 第二行
@@ -72,6 +82,14 @@ fun StatusOverviewCard(
                     title = "连接状态",
                     status = if (phoneDeviceCount > 0) "$phoneDeviceCount 设备" else "未连接",
                     isActive = phoneDeviceCount > 0,
+                    modifier = Modifier.weight(1f)
+                )
+
+                ServiceControlUnit(
+                    imageVector = MaterialIconsRes.SCAN,
+                    title = "扫描设备",
+                    status = "手机设备",
+                    onClick = onScanDevices,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -140,6 +158,58 @@ private fun StatusUnit(
                 text = status,
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (isActive) Success else GoldOnSurfaceVariant,
+                fontWeight = FontWeight.Medium,
+                fontSize = 13.sp
+            )
+        }
+    }
+}
+
+/**
+ * 服务控制单元组件（可点击）
+ */
+@Composable
+private fun ServiceControlUnit(
+    imageVector: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    status: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(8.dp),
+        color = GoldPrimary.copy(alpha = 0.2f)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            // 图标
+            MaterialIcon(
+                imageVector = imageVector,
+                contentDescription = title,
+                iconSize = MaterialIconSizes.STATUS_UNIT,
+                tint = GoldPrimary
+            )
+
+            // 标题
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodySmall,
+                color = GoldOnSurface,
+                fontSize = 12.sp
+            )
+
+            // 状态文字
+            Text(
+                text = status,
+                style = MaterialTheme.typography.bodyMedium,
+                color = GoldPrimary,
                 fontWeight = FontWeight.Medium,
                 fontSize = 13.sp
             )

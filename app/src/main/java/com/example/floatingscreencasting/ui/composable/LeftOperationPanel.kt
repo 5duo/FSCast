@@ -2,8 +2,10 @@ package com.example.floatingscreencasting.ui.composable
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -46,8 +48,6 @@ fun LeftOperationPanel(
     onDefaultClick: () -> Unit,
     onCustomClick: () -> Unit,
     onDisplayChange: (Int) -> Unit,
-    onRestartWebSocket: () -> Unit,
-    onScanDevices: () -> Unit,
     onOpenSettingsPanel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -55,9 +55,13 @@ fun LeftOperationPanel(
         modifier = modifier
             .width(400.dp)
             .fillMaxHeight()
-            .padding(start = 16.dp, top = 16.dp, bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(start = 16.dp, top = 16.dp, bottom = 16.dp)
     ) {
+        Column(
+            modifier = Modifier
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
         // 1. 播放控制区（保持不变）
         PlaybackControlSection(
             isPlaying = isPlaying,
@@ -90,22 +94,7 @@ fun LeftOperationPanel(
             onOpenSettingsPanel = onOpenSettingsPanel,
             modifier = Modifier.fillMaxWidth()
         )
-
-        // 3. 快速操作区（从原Section 2移过来）
-        QuickActionSection(
-            onCenterClick = onCenterClick,
-            onMaximizeClick = onMaximizeClick,
-            onCustomClick = onCustomClick,
-            onDefaultClick = onDefaultClick,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        // 4. 服务控制区（简化：移除屏幕选择）
-        ServiceControlSection(
-            onRestartWebSocket = onRestartWebSocket,
-            onScanDevices = onScanDevices,
-            modifier = Modifier.fillMaxWidth()
-        )
+        }
     }
 }
 

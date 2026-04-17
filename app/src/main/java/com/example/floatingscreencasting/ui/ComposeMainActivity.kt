@@ -303,8 +303,6 @@ class ComposeMainActivity : AppCompatActivity() {
                     onDefaultClick = onDefaultClick,
                     onCustomClick = onCustomClick,
                     onDisplayChange = onDisplayChange,
-                    onRestartWebSocket = { restartWebSocketServer() },
-                    onScanDevices = onScanDevices,
                     onOpenSettingsPanel = { showScreenSettingsDialog = true }
                 )
 
@@ -322,6 +320,8 @@ class ComposeMainActivity : AppCompatActivity() {
                     videoTitle = uiState.currentVideoTitle,
                     videoUrl = uiState.currentVideoUrl,
                     onSeek = onSeek,
+                    onRestartWebSocket = { restartWebSocketServer() },
+                    onScanDevices = onScanDevices,
                     modifier = Modifier.weight(1f)
                 )
             }

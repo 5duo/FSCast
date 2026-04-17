@@ -31,6 +31,8 @@ fun RightStatusPanel(
     videoTitle: String,
     videoUrl: String,
     onSeek: (Long) -> Unit,
+    onRestartWebSocket: () -> Unit,
+    onScanDevices: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // 使用简单Column结构，固定高度控制
@@ -46,6 +48,8 @@ fun RightStatusPanel(
             isWindowVisible = isWindowVisible,
             audioOutputMode = audioOutputMode,
             phoneDeviceCount = phoneDeviceCount,
+            onRestartWebSocket = onRestartWebSocket,
+            onScanDevices = onScanDevices,
             modifier = Modifier.fillMaxWidth()
         )
 
