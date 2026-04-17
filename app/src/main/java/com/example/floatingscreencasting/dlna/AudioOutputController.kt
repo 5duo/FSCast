@@ -23,8 +23,8 @@ class AudioOutputController(
 
     companion object {
         private const val TAG = "AudioOutputController"
-        private const val PROGRESS_CHECK_INTERVAL_MS = 10000L // 进度检查间隔：10秒
-        private const val SYNC_THRESHOLD_MS = 2000L // 同步阈值：2秒
+        private const val PROGRESS_CHECK_INTERVAL_MS = 5000L // 进度检查间隔：5秒（优化：减少同步延迟）
+        private const val SYNC_THRESHOLD_MS = 3000L // 同步阈值：3秒（优化：减少不必要的重新对齐，避免卡顿）
     }
 
     enum class OutputMode {
@@ -143,13 +143,17 @@ class AudioOutputController(
                         return false
                     }
 
-                    // 等待手机端加载视频（2秒）
+                    // 等待手机端加载视频（3秒，考虑网络延迟）
                     Log.i(TAG, "步骤3: 等待手机端加载视频...")
-                    delay(2000)
+                    delay(3000)
 
-                    // 4. 发送"同时播放"命令
-                    Log.i(TAG, "步骤4: 发送同时播放命令")
+                    // 4. 同时启动两端播放
+                    Log.i(TAG, "步骤4: 同时启动两端播放")
+                    // 车机端开始播放（静音状态）
+                    playbackStateListener?.onPlay()
+                    // 同时发送命令到手机端
                     webSocketServer.sendResumeCommand()
+                    Log.i(TAG, "两端同步启动完成")
                 } else {
                     Log.e(TAG, "========================================")
                     Log.e(TAG, "错误：当前没有视频URI，无法切换到手机模式")

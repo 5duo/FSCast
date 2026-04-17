@@ -592,11 +592,60 @@ class ComposeMainActivity : AppCompatActivity() {
         webSocketServer.onClientDisconnected = { clientId ->
             Log.i("ComposeMainActivity", "手机端已断开: $clientId")
             lifecycleScope.launch(Dispatchers.Main) {
-                Toast.makeText(this@ComposeMainActivity, "FSCast Remote已断开", Toast.LENGTH_SHORT).show()
+                // 如果当前是手机模式，自动切换回扬声器模式
+                if (audioOutputController.getCurrentMode() == AudioOutputController.OutputMode.PHONE) {
+                    Log.i("ComposeMainActivity", "手机端断开，自动切换回扬声器模式")
+                    audioOutputController.switchOutputMode(AudioOutputController.OutputMode.SPEAKER)
+                }
+                Toast.makeText(this@ComposeMainActivity, "FSCast Remote已断开，已切换回扬声器", Toast.LENGTH_SHORT).show()
                 _uiState.value = uiState.value.copy(
                     connectedPhoneDevice = null,
                     phoneDeviceCount = 0
                 )
+            }
+        }
+
+        // 处理来自手机端的消息
+        webSocketServer.onMessageReceived = { message, ws ->
+            try {
+                val json = org.json.JSONObject(message)
+                val type = json.getString("type")
+
+                when (type) {
+                    "state_update" -> {
+                        // 手机端播放状态更新
+                        val data = json.getJSONObject("data")
+                        val position = data.getLong("position")
+                        val duration = data.getLong("duration")
+                        val isPlaying = data.getBoolean("isPlaying")
+
+                        Log.i("ComposeMainActivity", "手机端状态更新: ${position}ms/${duration}ms, playing=$isPlaying")
+                        // TODO: 更新UI状态显示手机端播放状态
+                    }
+                    "error" -> {
+                        // 手机端错误报告
+                        val data = json.getJSONObject("data")
+                        val errorMessage = data.getString("message")
+
+                        Log.e("ComposeMainActivity", "手机端错误: $errorMessage")
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            Toast.makeText(this@ComposeMainActivity, "手机端错误: $errorMessage", Toast.LENGTH_LONG).show()
+                            // 自动切换回扬声器模式
+                            audioOutputController.switchOutputMode(AudioOutputController.OutputMode.SPEAKER)
+                        }
+                    }
+                    "connected" -> {
+                        // 手机端连接确认（可选，已在onClientConnected中处理）
+                        val data = json.getJSONObject("data")
+                        val deviceType = data.getString("deviceType")
+                        Log.i("ComposeMainActivity", "手机端设备类型: $deviceType")
+                    }
+                    else -> {
+                        Log.d("ComposeMainActivity", "收到未知消息类型: $type")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("ComposeMainActivity", "解析手机端消息失败: ${e.message}")
             }
         }
     }
@@ -1048,7 +1097,12 @@ class ComposeMainActivity : AppCompatActivity() {
         webSocketServer.onClientDisconnected = { clientId ->
             Log.i("ComposeMainActivity", "手机端已断开: $clientId")
             lifecycleScope.launch {
-                Toast.makeText(this@ComposeMainActivity, "FSCast Remote已断开", Toast.LENGTH_SHORT).show()
+                // 如果当前是手机模式，自动切换回扬声器模式
+                if (audioOutputController.getCurrentMode() == AudioOutputController.OutputMode.PHONE) {
+                    Log.i("ComposeMainActivity", "手机端断开，自动切换回扬声器模式")
+                    audioOutputController.switchOutputMode(AudioOutputController.OutputMode.SPEAKER)
+                }
+                Toast.makeText(this@ComposeMainActivity, "FSCast Remote已断开，已切换回扬声器", Toast.LENGTH_SHORT).show()
                 // 更新UI状态，清除连接设备
                 _uiState.value = uiState.value.copy(
                     connectedPhoneDevice = null,

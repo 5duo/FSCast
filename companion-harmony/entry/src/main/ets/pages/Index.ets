@@ -1,17 +1,25 @@
 /**
  * FSCast Remote 主页面
  * DLNA DMR + 设备发现响应 + 同步客户端
+ * UI重构：控制台风格，移除播放模式选择，统一状态管理
  */
 import { hilog } from '@kit.PerformanceAnalysisKit'
 import { preferences } from '@kit.ArkData'
+import { connection } from '@kit.NetworkKit'
 import { http } from '@kit.NetworkKit'
-import media from '@ohos.multimedia.media'
-import { SsdpServer } from '../service/SsdpServer'
-import { DlnaHttpServer } from '../service/DlnaHttpServer'
-import { VideoPlayer } from '../service/VideoPlayer'
-import { SyncClient } from '../service/SyncClient'
-import { PhoneDiscoveryResponse } from '../service/PhoneDiscoveryResponse'
+import { pasteboard } from '@kit.BasicServicesKit'
+import { fileIo } from '@kit.CoreFileKit'
+import { common } from '@kit.AbilityKit'
+import { Environment } from '@kit.CoreFileKit'
 import { CarWebSocketClient } from '../service/CarWebSocketClient'
+import { VideoPlayer } from '../service/VideoPlayer'
+import { MediaSessionService } from '../service/MediaSessionService'
+import { BackgroundService } from '../service/BackgroundService'
+import { StatusPanel } from '../components/StatusPanel'
+import { VideoPlayerCard } from '../components/VideoPlayerCard'
+import { VideoUrlCard } from '../components/VideoUrlCard'
+import { ControlPanel } from '../components/ControlPanel'
+import { CarIpDialog } from '../components/CarIpDialog'
 
 const TAG = 'IndexPage'
 const DOMAIN = 0x0000
@@ -20,45 +28,24 @@ const DOMAIN = 0x0000
 @Component
 struct Index {
   // ===== 服务实例 =====
-  private ssdpServer: SsdpServer = new SsdpServer()
-  private dlnaHttpServer: DlnaHttpServer = new DlnaHttpServer()
   private videoPlayer: VideoPlayer = new VideoPlayer()
-  private syncClient: SyncClient = new SyncClient()
-  private phoneDiscoveryResponse: PhoneDiscoveryResponse = new PhoneDiscoveryResponse()
   private carWebSocketClient: CarWebSocketClient = new CarWebSocketClient()
+  private mediaSessionService: MediaSessionService = new MediaSessionService()
+  private backgroundService: BackgroundService = new BackgroundService()
+
+  // ===== 网络连接监听 =====
+  private netCon = connection.createNetConnection()
 
   // ===== 车机端IP地址 =====
   private carIpAddress: string = '192.168.200.47'  // 默认车机IP
   private dataPreferences?: preferences.Preferences  // 用于持久化配置
 
-  // 加载保存的车机IP地址
-  private async loadCarIpAddress() {
-    try {
-      if (!this.dataPreferences) {
-        this.dataPreferences = await preferences.getPreferences(getContext(), 'car_ip_config')
-      }
-      const savedIp = await this.dataPreferences.get('car_ip_address', '192.168.200.47') as string
-      this.carIpAddress = savedIp
-      hilog.info(DOMAIN, TAG, `从配置加载车机IP: ${this.carIpAddress}`)
-    } catch (err) {
-      hilog.error(DOMAIN, TAG, '加载车机IP失败')
-    }
-  }
+  // ===== IP设置对话框控制器 =====
+  private ipDialogController?: CustomDialogController
 
-  // 保存车机IP地址
-  private async saveCarIpAddress(ip: string) {
-    try {
-      if (!this.dataPreferences) {
-        this.dataPreferences = await preferences.getPreferences(getContext(), 'car_ip_config')
-      }
-      await this.dataPreferences.put('car_ip_address', ip)
-      await this.dataPreferences.flush()
-      this.carIpAddress = ip
-      hilog.info(DOMAIN, TAG, `车机IP已保存: ${ip}`)
-    } catch (err) {
-      hilog.error(DOMAIN, TAG, '保存车机IP失败')
-    }
-  }
+  // ===== 状态刷新定时器 =====
+  private statusCheckTimer: number = -1
+  private readonly STATUS_CHECK_INTERVAL = 5000  // 5秒
 
   // ===== DLNA DMR状态 =====
   @State dlnaUri: string = ''  // 接收到的DLNA播放URI
@@ -74,39 +61,106 @@ struct Index {
   private lastSeekTime: number = 0  // 上次seek的时间戳
   @State phoneActualPosition: number = 0  // 手机端实际播放进度
 
-  // ===== 同步状态 =====
-  @State syncConnected: boolean = false
-
   // ===== WebSocket连接状态 =====
   @State webSocketConnected: boolean = false
   @State carConnectionStatus: string = '未连接'
+  @State isConnecting: boolean = false  // 正在连接中
 
-  // ===== 播放模式 =====
-  @State playbackMode: 'audio_only' | 'video_audio' = 'audio_only'
+  // ===== 新增状态变量 =====
+  @State networkStatus: string = 'unknown'  // unknown, available, lost
+  @State lastConnectionTime: number = 0  // 最后连接时间戳
+  @State isStatusPanelExpanded: boolean = false  // 状态面板展开状态
+  @State tempIp: string = ''  // IP设置对话框临时变量
 
-  // ===== 服务运行状态 =====
-  @State ssdpRunning: boolean = false
-  @State dlnaHttpRunning: boolean = false
-  @State discoveryResponseRunning: boolean = false
-
-  // ===== HTTP测试结果 =====
-  @State httpTestResult: string = ''
-  @State httpTestLoading: boolean = false
-
-  // ===== 独立视频播放器 =====
-  @State testVideoPlaying: boolean = false
-  @State testVideoProgress: number = 0
-  @State testVideoDuration: number = 0
-  private testVideoController: VideoController = new VideoController()
+  // 下载状态
+  @State isDownloading: boolean = false
+  @State downloadProgress: number = 0
 
   aboutToAppear(): void {
     hilog.info(DOMAIN, TAG, 'Page aboutToAppear')
 
-    // 设置DLNA服务回调
-    this.setupDlnaCallbacks()
+    // 设置媒体服务和后台服务的上下文
+    this.mediaSessionService.setContext(getContext(this))
+    this.backgroundService.setContext(getContext(this))
 
     // 异步初始化服务
     this.initializeServices()
+
+    // 初始化媒体会话
+    this.initializeMediaSession()
+
+    // 启动定期状态检查
+    this.startPeriodicStatusCheck()
+  }
+
+  /**
+   * 初始化媒体会话
+   */
+  private async initializeMediaSession(): Promise<void> {
+    try {
+      // 创建并激活AVSession
+      await this.mediaSessionService.createSession()
+
+      // 设置MediaSession控制回调
+      this.mediaSessionService.onPlay = () => {
+        hilog.info(DOMAIN, TAG, 'MediaSession: 播放命令')
+        this.playVideo()
+      }
+      this.mediaSessionService.onPause = () => {
+        hilog.info(DOMAIN, TAG, 'MediaSession: 暂停命令')
+        this.pauseVideo()
+      }
+      this.mediaSessionService.onStop = () => {
+        hilog.info(DOMAIN, TAG, 'MediaSession: 停止命令')
+        this.stopVideoAndClearState()
+      }
+      this.mediaSessionService.onSeek = (position: number) => {
+        hilog.info(DOMAIN, TAG, `MediaSession: 跳转命令 ${position}ms`)
+        this.seekVideo(position)
+      }
+
+      hilog.info(DOMAIN, TAG, '媒体会话初始化完成')
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, `媒体会话初始化失败: ${JSON.stringify(error)}`)
+    }
+  }
+
+  /**
+   * 设置网络状态监听
+   */
+  private setupNetworkListener(): void {
+    // 网络可用
+    this.netCon.on('netAvailable', () => {
+      hilog.info(DOMAIN, TAG, '========================================')
+      hilog.info(DOMAIN, TAG, '网络可用，尝试恢复播放')
+      hilog.info(DOMAIN, TAG, '========================================')
+
+      // 更新网络状态
+      this.networkStatus = 'available'
+
+      // 如果之前正在播放，尝试恢复播放
+      if (this.dlnaUri.length > 0 && this.dlnaIsPlaying) {
+        this.mainVideoController.start()
+        hilog.info(DOMAIN, TAG, '已恢复播放')
+      }
+    })
+
+    // 网络丢失
+    this.netCon.on('netLost', () => {
+      hilog.warn(DOMAIN, TAG, '========================================')
+      hilog.warn(DOMAIN, TAG, '网络丢失，暂停播放')
+      hilog.warn(DOMAIN, TAG, '========================================')
+
+      // 更新网络状态
+      this.networkStatus = 'lost'
+
+      // 暂停播放
+      this.mainVideoController.pause()
+      this.dlnaIsPlaying = false
+      hilog.warn(DOMAIN, TAG, '已暂停播放')
+    })
+
+    hilog.info(DOMAIN, TAG, '网络状态监听已设置')
   }
 
   /**
@@ -117,26 +171,80 @@ struct Index {
       // 加载保存的车机IP地址
       await this.loadCarIpAddress()
 
-      // 启动SSDP服务
-      await this.ssdpServer.start()
-      this.ssdpRunning = true
-      hilog.info(DOMAIN, TAG, 'SSDP服务已启动')
-
-      // 启动DLNA HTTP服务器
-      await this.dlnaHttpServer.start()
-      this.dlnaHttpRunning = true
-      hilog.info(DOMAIN, TAG, 'DLNA HTTP服务器已启动')
-
-      // 启动设备发现响应服务
-      await this.phoneDiscoveryResponse.start()
-      this.discoveryResponseRunning = true
-      hilog.info(DOMAIN, TAG, '设备发现响应服务已启动')
+      // 设置网络状态监听
+      this.setupNetworkListener()
 
       // 连接到车机端WebSocket
       this.connectToCar()
 
+      hilog.info(DOMAIN, TAG, '服务初始化完成')
+
     } catch (error) {
       hilog.error(DOMAIN, TAG, `启动服务失败: ${JSON.stringify(error)}`)
+    }
+  }
+
+  /**
+   * 启动定期状态检查
+   */
+  private startPeriodicStatusCheck(): void {
+    this.statusCheckTimer = setInterval(() => {
+      this.checkAllServiceStatus()
+    }, this.STATUS_CHECK_INTERVAL)
+
+    hilog.info(DOMAIN, TAG, `定期状态检查已启动，间隔: ${this.STATUS_CHECK_INTERVAL}ms`)
+  }
+
+  /**
+   * 检查所有服务状态
+   */
+  private checkAllServiceStatus(): void {
+    // 检查WebSocket连接状态
+    const wsConnected = this.carWebSocketClient.isClientConnected()
+    if (this.webSocketConnected !== wsConnected) {
+      this.webSocketConnected = wsConnected
+      this.carConnectionStatus = wsConnected ?
+        `已连接: ${this.carIpAddress}` : '未连接'
+
+      // 更新最后连接时间
+      if (wsConnected && !this.webSocketConnected) {
+        this.lastConnectionTime = Date.now()
+      }
+
+      hilog.info(DOMAIN, TAG, `WebSocket状态变化: ${this.carConnectionStatus}`)
+    }
+  }
+
+  /**
+   * 加载保存的车机IP地址
+   */
+  private async loadCarIpAddress() {
+    try {
+      if (!this.dataPreferences) {
+        this.dataPreferences = await preferences.getPreferences(getContext(), 'car_ip_config')
+      }
+      const savedIp = await this.dataPreferences.get('car_ip_address', '192.168.200.47') as string
+      this.carIpAddress = savedIp
+      hilog.info(DOMAIN, TAG, `从配置加载车机IP: ${this.carIpAddress}`)
+    } catch (err) {
+      hilog.error(DOMAIN, TAG, '加载车机IP失败')
+    }
+  }
+
+  /**
+   * 保存车机IP地址
+   */
+  private async saveCarIpAddress(ip: string) {
+    try {
+      if (!this.dataPreferences) {
+        this.dataPreferences = await preferences.getPreferences(getContext(), 'car_ip_config')
+      }
+      await this.dataPreferences.put('car_ip_address', ip)
+      await this.dataPreferences.flush()
+      this.carIpAddress = ip
+      hilog.info(DOMAIN, TAG, `车机IP已保存: ${ip}`)
+    } catch (err) {
+      hilog.error(DOMAIN, TAG, '保存车机IP失败')
     }
   }
 
@@ -145,6 +253,7 @@ struct Index {
    */
   private connectToCar(): void {
     hilog.info(DOMAIN, TAG, `尝试连接到车机端: ${this.carIpAddress}`)
+    this.isConnecting = true
 
     // 设置WebSocket回调
     this.carWebSocketClient.setOnPlayCommand((uri: string, httpHeaders: Record<string, string>) => {
@@ -205,6 +314,11 @@ struct Index {
       hilog.warn(DOMAIN, TAG, `与车机断开连接，立即暂停视频`)
       hilog.warn(DOMAIN, TAG, `========================================`)
 
+      // 更新连接状态
+      this.webSocketConnected = false
+      this.carConnectionStatus = '未连接'
+      this.isConnecting = false
+
       // 立即暂停视频
       this.mainVideoController.pause()
       this.dlnaIsPlaying = false
@@ -214,6 +328,15 @@ struct Index {
       hilog.info(DOMAIN, TAG, '视频已暂停，等待重新连接')
     })
 
+    // 连接成功回调
+    this.carWebSocketClient.setOnConnected(() => {
+      hilog.info(DOMAIN, TAG, 'WebSocket连接成功')
+      this.webSocketConnected = true
+      this.carConnectionStatus = `已连接: ${this.carIpAddress}`
+      this.lastConnectionTime = Date.now()
+      this.isConnecting = false
+    })
+
     this.carWebSocketClient.setOnPauseCommand(() => {
       hilog.info(DOMAIN, TAG, '收到暂停命令')
       this.mainVideoController.pause()
@@ -221,8 +344,7 @@ struct Index {
 
     this.carWebSocketClient.setOnStopCommand(() => {
       hilog.info(DOMAIN, TAG, '收到停止命令')
-      this.mainVideoController.stop()
-      this.dlnaPosition = 0
+      this.stopVideoAndClearState()
     })
 
     this.carWebSocketClient.setOnSeekCommand((position: number) => {
@@ -239,35 +361,27 @@ struct Index {
       this.dlnaDuration = duration
       this.dlnaIsPlaying = isPlaying
 
-      // 新的同步策略：每10秒检查一次进度差异
-      // 如果差异超过2秒，执行重新对齐流程
+      // 优化的同步策略：每5秒检查一次进度差异
+      // 如果差异超过3秒，执行平滑对齐（减少卡顿）
       if (this.mainVideoPrepared) {
         // 计算进度差异（手机实际进度 vs 车机端进度）
         const positionDiff = Math.abs(this.phoneActualPosition - position)
 
         hilog.info(DOMAIN, TAG, `进度检查: 手机${this.phoneActualPosition}ms, 车机${position}ms, 差异${positionDiff}ms`)
 
-        // 差异超过2秒时执行重新对齐
-        if (positionDiff > 2000) {
+        // 差异超过3秒时执行平滑对齐（优化：从1秒提高到3秒，减少不必要的重新对齐）
+        if (positionDiff > 3000) {
           hilog.info(DOMAIN, TAG, `========================================`)
-          hilog.info(DOMAIN, TAG, `进度差异过大(${positionDiff}ms)，执行重新对齐`)
-          hilog.info(DOMAIN, TAG, `步骤1: 手机端暂停`)
-          this.mainVideoController.pause()
-          this.dlnaIsPlaying = false
-
-          // 步骤2: 跳转到车机端进度
+          hilog.info(DOMAIN, TAG, `进度差异过大(${positionDiff}ms)，执行平滑对齐`)
+          // 平滑同步：直接调整进度，不暂停播放（优化：减少播放中断和卡顿）
           const positionSeconds = Math.floor(position / 1000)
-          hilog.info(DOMAIN, TAG, `步骤2: 跳转到 ${positionSeconds}s`)
+          hilog.info(DOMAIN, TAG, `平滑对齐到 ${positionSeconds}s`)
           this.mainVideoController.setCurrentTime(positionSeconds)
-
-          // 步骤3: 等待加载完成（2秒）
-          hilog.info(DOMAIN, TAG, `步骤3: 等待视频加载...`)
-          setTimeout(() => {
-            hilog.info(DOMAIN, TAG, `步骤4: 加载完成，恢复播放`)
-            this.mainVideoController.start()
-            this.dlnaIsPlaying = true
-            hilog.info(DOMAIN, TAG, `========================================`)
-          }, 2000)
+          // 不暂停，保持播放状态（如果正在播放）
+          if (this.dlnaIsPlaying) {
+            hilog.info(DOMAIN, TAG, `保持播放状态，平滑对齐完成`)
+          }
+          hilog.info(DOMAIN, TAG, `========================================`)
         }
       }
     })
@@ -275,15 +389,17 @@ struct Index {
     // 连接到车机端
     this.carWebSocketClient.connect(this.carIpAddress)
 
-    // 检查连接状态
-    this.checkConnectionStatus()
+    // 延迟检查连接状态
+    setTimeout(() => {
+      this.isConnecting = false
+    }, 3000)
   }
 
   /**
    * 重新连接到车机端
    */
   private reconnectToCar(): void {
-    hilog.info(DOMAIN, TAG, '用户手动刷新连接')
+    hilog.info(DOMAIN, TAG, '用户手动触发重新连接')
 
     // 先断开现有连接
     if (this.carWebSocketClient.isClientConnected()) {
@@ -294,104 +410,70 @@ struct Index {
     // 等待一小段时间后重新连接
     setTimeout(() => {
       hilog.info(DOMAIN, TAG, `重新连接到车机端: ${this.carIpAddress}`)
-      this.carWebSocketClient.connect(this.carIpAddress)
-
-      // 检查连接状态
-      setTimeout(() => {
-        const isConnected = this.carWebSocketClient.isClientConnected()
-        this.webSocketConnected = isConnected
-        this.carConnectionStatus = isConnected ? `已连接: ${this.carIpAddress}` : '未连接'
-        hilog.info(DOMAIN, TAG, `重连结果: ${this.carConnectionStatus}`)
-      }, 2000)
+      this.connectToCar()
     }, 500)
   }
 
   /**
-   * 检查连接状态
+   * 显示IP设置对话框
    */
-  private checkConnectionStatus(): void {
-    // 延迟检查，等待连接建立
+  private showIpDialog(): void {
+    hilog.info(DOMAIN, TAG, '显示IP设置对话框')
+
+    // 如果已有对话框实例，先关闭
+    if (this.ipDialogController !== undefined) {
+      this.ipDialogController.close()
+      this.ipDialogController = undefined
+    }
+
+    // 初始化临时变量
+    this.tempIp = this.carIpAddress
+
+    // 创建新的对话框实例
+    this.ipDialogController = new CustomDialogController({
+      builder: CarIpDialog({
+        ipAddress: $tempIp,
+        onSave: (ip: string) => {
+          this.saveCarIpAddressAndConnect(ip)
+        }
+      }),
+      customStyle: true,
+      alignment: DialogAlignment.Center
+    })
+
+    this.ipDialogController.open()
+  }
+
+  /**
+   * 保存IP地址并连接
+   */
+  private async saveCarIpAddressAndConnect(ip: string): Promise<void> {
+    await this.saveCarIpAddress(ip)
+    hilog.info(DOMAIN, TAG, `IP已保存，准备连接: ${ip}`)
+
+    // 断开现有连接
+    if (this.carWebSocketClient.isClientConnected()) {
+      this.carWebSocketClient.disconnect()
+    }
+
+    // 等待1秒后连接
     setTimeout(() => {
-      const isConnected = this.carWebSocketClient.isClientConnected()
-      this.webSocketConnected = isConnected
-      this.carConnectionStatus = isConnected ? `已连接: ${this.carIpAddress}` : '未连接'
-      hilog.info(DOMAIN, TAG, `连接状态: ${this.carConnectionStatus}`)
+      this.connectToCar()
     }, 1000)
-
-    // 定期检查连接状态
-    setInterval(() => {
-      const isConnected = this.carWebSocketClient.isClientConnected()
-      if (this.webSocketConnected !== isConnected) {
-        this.webSocketConnected = isConnected
-        this.carConnectionStatus = isConnected ? `已连接: ${this.carIpAddress}` : '未连接'
-        hilog.info(DOMAIN, TAG, `连接状态变化: ${this.carConnectionStatus}`)
-      }
-    }, 5000)
   }
 
   /**
-   * 设置DLNA服务回调
+   * 设置DLNA服务回调（已移除DLNA服务，此方法不再需要）
    */
-  private setupDlnaCallbacks(): void {
-    // 播放回调
-    this.dlnaHttpServer.setPlayCallback(() => {
-      hilog.info(DOMAIN, TAG, 'DLNA Play命令')
-      this.playVideo()
-    })
-
-    this.dlnaHttpServer.setPauseCallback(() => {
-      hilog.info(DOMAIN, TAG, 'DLNA Pause命令')
-      this.pauseVideo()
-    })
-
-    this.dlnaHttpServer.setStopCallback(() => {
-      hilog.info(DOMAIN, TAG, 'DLNA Stop命令')
-      this.stopVideo()
-    })
-
-    this.dlnaHttpServer.setSeekCallback((position: number) => {
-      hilog.info(DOMAIN, TAG, `DLNA Seek命令: ${position}`)
-      this.seekVideo(position)
-    })
-
-    // 同步客户端回调
-    this.syncClient.setOnPlayCommand(() => {
-      hilog.info(DOMAIN, TAG, '车机请求播放')
-      this.playVideo()
-    })
-
-    this.syncClient.setOnPauseCommand(() => {
-      hilog.info(DOMAIN, TAG, '车机请求暂停')
-      this.pauseVideo()
-    })
-
-    this.syncClient.setOnStopCommand(() => {
-      hilog.info(DOMAIN, TAG, '车机请求停止')
-      this.stopVideo()
-    })
-
-    this.syncClient.setOnSeekCommand((position: number) => {
-      hilog.info(DOMAIN, TAG, `车机请求跳转: ${position}`)
-      this.seekVideo(position)
-    })
-
-    this.syncClient.setOnProgressUpdate((position: number, duration: number, isPlaying: boolean) => {
-      this.dlnaIsPlaying = isPlaying
-      this.dlnaPosition = position
-      this.dlnaDuration = duration
-    })
-  }
-
-  /**
-   * 监听DLNA URI变化（已禁用，改为直接调用playVideo）
-   */
-  onDlnaUriChanged(): void {
-    // 不再使用@Watch自动播放，改为收到play命令后直接调用
-    hilog.debug(DOMAIN, TAG, `onDlnaUriChanged被触发（已禁用自动播放）`)
-  }
 
   aboutToDisappear(): void {
     hilog.info(DOMAIN, TAG, 'Page aboutToDisappear')
+
+    // 清理状态检查定时器
+    if (this.statusCheckTimer !== -1) {
+      clearInterval(this.statusCheckTimer)
+    }
+
     this.cleanup()
   }
 
@@ -411,6 +493,13 @@ struct Index {
       hilog.info(DOMAIN, TAG, `HTTP头数量: ${Object.keys(this.dlnaHttpHeaders).length}`)
       hilog.info(DOMAIN, TAG, `HTTP头: ${JSON.stringify(this.dlnaHttpHeaders)}`)
 
+      // 启动后台服务（保持后台播放）
+      await this.backgroundService.start()
+      await this.mediaSessionService.startBackgroundService()
+
+      // 设置媒体元数据
+      await this.updateMediaMetadata()
+
       // 确保使用视频+音频模式（完整播放）
       // 传递HTTP头以支持B站反爬虫验证
       await this.videoPlayer.play(this.dlnaUri, this.dlnaHttpHeaders)
@@ -424,68 +513,47 @@ struct Index {
   }
 
   /**
-   * 测试HTTP请求 - 验证URL和HTTP头是否有效
-   * 如果成功（状态码200），自动播放视频
+   * 更新媒体元数据
    */
-  private async testHttpUrl(): Promise<void> {
-    if (this.dlnaUri.length === 0) {
-      this.httpTestResult = '❌ 无URL可测试'
-      return
-    }
-
-    this.httpTestLoading = true
-    this.httpTestResult = '⏳ 正在请求...'
-
+  private async updateMediaMetadata(): Promise<void> {
     try {
-      hilog.info(DOMAIN, TAG, `开始测试HTTP请求，URL长度: ${this.dlnaUri.length}`)
-      hilog.info(DOMAIN, TAG, `HTTP头数量: ${Object.keys(this.dlnaHttpHeaders).length}`)
-
-      // 创建HTTP请求
-      const httpRequest = http.createHttp()
-
-      // 设置请求选项
-      const options: http.HttpRequestOptions = {
-        method: http.RequestMethod.HEAD,  // 使用HEAD方法只获取响应头
-        header: this.dlnaHttpHeaders as Record<string, string>,
-        connectTimeout: 10000,
-        readTimeout: 10000
-      } as http.HttpRequestOptions
-
-      hilog.info(DOMAIN, TAG, `发送HEAD请求到: ${this.dlnaUri.substring(0, 80)}...`)
-
-      // 发送请求
-      const response = await httpRequest.request(this.dlnaUri, options) as http.HttpResponse
-
-      hilog.info(DOMAIN, TAG, `收到响应，状态码: ${response.responseCode}`)
-      hilog.info(DOMAIN, TAG, `响应头: ${JSON.stringify(response.header)}`)
-
-      // 格式化结果
-      const status: number = response.responseCode
-      const header = response.header as Record<string, string>
-      const contentType: string = header['Content-Type'] || header['content-type'] || 'unknown'
-      const contentLength: string = header['Content-Length'] || header['content-length'] || 'unknown'
-
-      if (status >= 200 && status < 300) {
-        this.httpTestResult = `✅ 请求成功!\n状态码: ${status}\n类型: ${contentType}\n大小: ${contentLength}\n\n开始播放视频...`
-
-        // 延迟500ms后自动播放视频
-        setTimeout(() => {
-          this.playVideo()
-        }, 500)
-      } else if (status === 403) {
-        this.httpTestResult = `❌ 403 禁止访问\n可能原因:\n1. HTTP头不正确\n2. URL已过期\n3. 反爬虫验证失败`
-      } else if (status === 404) {
-        this.httpTestResult = `❌ 404 文件不存在\nURL已失效或过期`
-      } else {
-        this.httpTestResult = `⚠️ 状态码: ${status}\n${contentType}`
+      // 从URL提取标题（简化处理，实际可以从元数据获取）
+      let title = 'FSCast 投屏视频'
+      if (this.dlnaUri.length > 0) {
+        try {
+          // ArkTS不支持URL类，使用字符串解析
+          const urlStr = this.dlnaUri
+          const queryIndex = urlStr.indexOf('?')
+          const pathOnly = queryIndex >= 0 ? urlStr.substring(0, queryIndex) : urlStr
+          const lastSlashIndex = pathOnly.lastIndexOf('/')
+          if (lastSlashIndex >= 0 && lastSlashIndex < pathOnly.length - 1) {
+            const fileName = pathOnly.substring(lastSlashIndex + 1)
+            if (fileName && fileName.length > 0) {
+              title = decodeURIComponent(fileName)
+            }
+          }
+        } catch (e) {
+          // URL解析失败，使用默认标题
+        }
       }
 
-      httpRequest.destroy()
+      // 设置元数据
+      await this.mediaSessionService.setMetadata(
+        title,
+        'FSCast Remote',
+        this.dlnaDuration
+      )
+
+      // 设置播放状态
+      await this.mediaSessionService.setPlaybackState(
+        this.dlnaIsPlaying,
+        this.dlnaPosition,
+        this.dlnaDuration
+      )
+
+      hilog.info(DOMAIN, TAG, `媒体元数据已更新: ${title}`)
     } catch (error) {
-      hilog.error(DOMAIN, TAG, `HTTP请求失败: ${JSON.stringify(error)}`)
-      this.httpTestResult = `❌ 请求失败\n${JSON.stringify(error)}`
-    } finally {
-      this.httpTestLoading = false
+      hilog.error(DOMAIN, TAG, `更新媒体元数据失败: ${JSON.stringify(error)}`)
     }
   }
 
@@ -515,6 +583,39 @@ struct Index {
   }
 
   /**
+   * 停止视频并清空状态（用于stop命令和播放完成）
+   */
+  private async stopVideoAndClearState(): Promise<void> {
+    hilog.info(DOMAIN, TAG, '========================================')
+    hilog.info(DOMAIN, TAG, 'stopVideoAndClearState: 停止播放并清空状态')
+    hilog.info(DOMAIN, TAG, '========================================')
+
+    try {
+      // 停止视频播放
+      await this.videoPlayer.stop()
+
+      // 清空URI和HTTP头
+      this.dlnaUri = ''
+      this.dlnaHttpHeaders = {}
+
+      // 重置播放状态
+      this.dlnaIsPlaying = false
+      this.dlnaPosition = 0
+      this.dlnaDuration = 0
+      this.mainVideoPrepared = false
+      this.phoneActualPosition = 0
+
+      // 停止后台服务和媒体会话
+      await this.backgroundService.stop()
+      await this.mediaSessionService.setPlaybackState(false, 0, 0)
+
+      hilog.info(DOMAIN, TAG, '状态已清空，回到等待投屏状态')
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, `清空状态失败: ${JSON.stringify(error)}`)
+    }
+  }
+
+  /**
    * 跳转
    */
   private async seekVideo(position: number): Promise<void> {
@@ -527,36 +628,143 @@ struct Index {
   }
 
   /**
-   * 清理资源
+   * 显示复制成功提示
    */
-  private cleanup(): void {
-    // 停止所有服务
-    this.ssdpServer.stop()
-    this.dlnaHttpServer.stop()
-    this.phoneDiscoveryResponse.stop()
-    this.syncClient.disconnect()
-    this.videoPlayer.release()
-
-    // 断开车机端连接
-    this.carWebSocketClient.disconnect()
+  private showCopySuccessToast(): void {
+    hilog.info(DOMAIN, TAG, 'URL已复制到剪贴板')
+    // TODO: 可以添加Toast提示
   }
 
   /**
-   * 格式化时间
+   * 下载视频（带进度显示）
    */
-  private formatTime(ms: number): string {
-    let totalSeconds = Math.max(0, Math.floor(ms / 1000))
-    let hours = Math.floor(totalSeconds / 3600)
-    let minutes = Math.floor((totalSeconds % 3600) / 60)
-    let seconds = totalSeconds % 60
-    if (hours > 0) {
-      return `${hours}:${this.pad2(minutes)}:${this.pad2(seconds)}`
+  private async downloadVideo(uri: string, headers: Record<string, string>): Promise<void> {
+    if (uri.length === 0) {
+      hilog.warn(DOMAIN, TAG, '无URI可下载')
+      return
     }
-    return `${this.pad2(minutes)}:${this.pad2(seconds)}`
+
+    let httpRequest: http.HttpRequest | null = null
+
+    try {
+      hilog.info(DOMAIN, TAG, `开始下载视频: ${uri.substring(0, 100)}...`)
+
+      // 生成文件名
+      const fileName = this.extractFileName(uri)
+
+      // 获取系统Download目录
+      const downloadDir = Environment.getUserDownloadDir()
+      const downloadPath = `${downloadDir}/${fileName}`
+
+      hilog.info(DOMAIN, TAG, `下载目录: ${downloadDir}`)
+
+      // 创建HTTP请求
+      httpRequest = http.createHttp()
+
+      // 设置请求选项，添加进度回调
+      const options: http.HttpRequestOptions = {
+        method: http.RequestMethod.GET,
+        header: headers as Record<string, string>,
+        connectTimeout: 30000,
+        readTimeout: 60000,
+        progress: (currentSize: number, totalSize: number) => {
+          // 计算下载进度百分比
+          if (totalSize > 0) {
+            const progress = Math.floor((currentSize / totalSize) * 100)
+            hilog.debug(DOMAIN, TAG, `下载进度: ${progress}% (${currentSize}/${totalSize})`)
+
+            // 直接更新下载进度状态
+            this.downloadProgress = progress
+          }
+        }
+      } as http.HttpRequestOptions
+
+      hilog.info(DOMAIN, TAG, `开始下载到: ${downloadPath}`)
+
+      // 发送请求（后台下载，不阻塞UI）
+      const response = await httpRequest.request(uri, options) as http.HttpResponse
+
+      if (response.responseCode >= 200 && response.responseCode < 300) {
+        // 将响应写入文件
+        const file = await fileIo.open(downloadPath, fileIo.OpenMode.CREATE | fileIo.OpenMode.WRITE_ONLY)
+
+        if (response.result instanceof ArrayBuffer) {
+          await fileIo.write(file.fd, response.result)
+        }
+
+        await fileIo.close(file.fd)
+
+        hilog.info(DOMAIN, TAG, `视频下载成功: ${downloadPath}`)
+
+        // 设置进度为100%并结束下载状态
+        this.downloadProgress = 100
+        this.isDownloading = false
+      } else {
+        hilog.error(DOMAIN, TAG, `下载失败，状态码: ${response.responseCode}`)
+        this.isDownloading = false
+        this.downloadProgress = 0
+      }
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, `下载视频失败: ${JSON.stringify(error)}`)
+      this.isDownloading = false
+      this.downloadProgress = 0
+    } finally {
+      // 销毁HTTP请求对象
+      if (httpRequest !== null) {
+        httpRequest.destroy()
+      }
+    }
   }
 
-  private pad2(n: number): string {
-    return n < 10 ? `0${n}` : `${n}`
+  /**
+   * 从URL提取文件名
+   */
+  private extractFileName(url: string): string {
+    try {
+      // ArkTS不支持URL类，使用字符串解析
+      const queryIndex = url.indexOf('?')
+      const pathOnly = queryIndex >= 0 ? url.substring(0, queryIndex) : url
+      const lastSlashIndex = pathOnly.lastIndexOf('/')
+
+      if (lastSlashIndex >= 0 && lastSlashIndex < pathOnly.length - 1) {
+        let fileName = pathOnly.substring(lastSlashIndex + 1)
+
+        // URL解码
+        try {
+          fileName = decodeURIComponent(fileName)
+        } catch (e) {
+          // 解码失败，使用原始文件名
+        }
+
+        // 如果没有扩展名，添加.mp4
+        if (!fileName.includes('.')) {
+          fileName = `${fileName}.mp4`
+        }
+
+        return fileName
+      }
+
+      // 默认文件名
+      return `video_${Date.now()}.mp4`
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, `提取文件名失败: ${JSON.stringify(error)}`)
+      return `video_${Date.now()}.mp4`
+    }
+  }
+
+  /**
+   * 清理资源
+   */
+  private cleanup(): void {
+    // 断开车机端连接
+    this.carWebSocketClient.disconnect()
+
+    // 释放视频播放器
+    this.videoPlayer.release()
+
+    // 释放媒体服务和后台服务
+    this.mediaSessionService.release()
+    this.backgroundService.stop()
   }
 
   // ==================== UI 构建 ====================
@@ -564,30 +772,73 @@ struct Index {
   build() {
     Scroll() {
       Column({ space: 12 }) {
-        // 标题栏
-        this.TitleBar()
+        // 状态面板（可展开）
+        StatusPanel({
+          webSocketConnected: this.webSocketConnected,
+          carConnectionStatus: this.carConnectionStatus,
+          networkStatus: this.networkStatus,
+          dlnaUri: this.dlnaUri,
+          dlnaIsPlaying: this.dlnaIsPlaying,
+          dlnaPosition: this.dlnaPosition,
+          dlnaDuration: this.dlnaDuration,
+          lastConnectionTime: this.lastConnectionTime,
+          isExpanded: $isStatusPanelExpanded,
+          onRefresh: () => {
+            this.reconnectToCar()
+          }
+        })
 
-        // DLNA DMR状态卡片
-        this.DlnaDmrStatusCard()
+        // 视频URL卡片（显示当前接收的URL）
+        VideoUrlCard({
+          dlnaUri: this.dlnaUri,
+          dlnaHttpHeaders: this.dlnaHttpHeaders,
+          isDownloading: $isDownloading,
+          downloadProgress: $downloadProgress,
+          onCopy: () => {
+            this.showCopySuccessToast()
+          },
+          onDownload: (uri: string, headers: Record<string, string>) => {
+            this.downloadVideo(uri, headers)
+          }
+        })
 
-        // 播放模式选择
-        this.PlaybackModeCard()
-
-        // 播放控制卡片
+        // 视频播放器（有URI时显示）
         if (this.dlnaUri.length > 0) {
-          this.PlaybackControlCard()
-
-          // 独立视频播放测试卡片
-          this.TestVideoPlayerCard()
+          VideoPlayerCard({
+            dlnaUri: this.dlnaUri,
+            dlnaHttpHeaders: this.dlnaHttpHeaders,
+            dlnaIsPlaying: this.dlnaIsPlaying,
+            dlnaPosition: this.dlnaPosition,
+            dlnaDuration: this.dlnaDuration,
+            videoController: this.mainVideoController,
+            onPlayStateChange: (isPlaying: boolean) => {
+              this.dlnaIsPlaying = isPlaying
+            },
+            onProgressUpdate: (position: number, duration: number) => {
+              this.phoneActualPosition = position
+              this.dlnaDuration = duration
+            },
+            onCompletion: () => {
+              this.stopVideoAndClearState()
+            },
+            onError: (error: ESObject) => {
+              hilog.error(DOMAIN, TAG, `视频播放错误: ${JSON.stringify(error)}`)
+            }
+          })
         }
 
-        // 同步状态卡片
-        if (this.syncConnected) {
-          this.SyncStatusCard()
-        }
-
-        // 服务状态卡片
-        this.ServiceStatusCard()
+        // 底部控制面板
+        ControlPanel({
+          webSocketConnected: this.webSocketConnected,
+          carIpAddress: this.carIpAddress,
+          isConnecting: this.isConnecting,
+          onReconnect: () => {
+            this.reconnectToCar()
+          },
+          onConfigureIp: () => {
+            this.showIpDialog()
+          }
+        })
 
         Blank().height(16)
       }
@@ -600,432 +851,5 @@ struct Index {
     .backgroundColor('#0F172A')
     .scrollBar(BarState.Auto)
     .scrollBarColor('#334155')
-  }
-
-  // ===== 标题栏 =====
-  @Builder
-  TitleBar() {
-    Row() {
-      Text('FSCast Remote')
-        .fontSize(22)
-        .fontWeight(FontWeight.Bold)
-        .fontColor('#F1F5F9')
-      Blank()
-      // 刷新按钮
-      Button() {
-        Text('🔄')
-          .fontSize(16)
-      }
-      .width(32)
-      .height(32)
-      .backgroundColor('#1E293B')
-      .borderRadius(16)
-      .type(ButtonType.Normal)
-      .onClick(() => {
-        hilog.info(DOMAIN, TAG, '用户点击刷新连接按钮')
-        this.reconnectToCar()
-      })
-      Blank()
-        .width(8)
-      // 连接状态指示器
-      Row({ space: 6 }) {
-        Circle()
-          .width(8)
-          .height(8)
-          .fill(this.webSocketConnected ? '#10B981' : '#64748B')
-        Text(this.carConnectionStatus)
-          .fontSize(12)
-          .fontColor(this.webSocketConnected ? '#10B981' : '#64748B')
-      }
-      .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-      .backgroundColor('#1E293B')
-      .borderRadius(12)
-      Blank()
-        .width(8)
-      Text('DLNA DMR')
-        .fontSize(13)
-        .fontColor('#6366F1')
-    }
-    .width('100%')
-    .height(48)
-    .alignItems(VerticalAlign.Center)
-  }
-
-  // ===== DLNA DMR状态卡片 =====
-  @Builder
-  DlnaDmrStatusCard() {
-    Column() {
-      Text('DLNA接收状态')
-        .fontSize(16)
-        .fontWeight(FontWeight.Medium)
-        .fontColor('#F1F5F9')
-        .width('100%')
-
-      if (this.dlnaUri.length > 0) {
-        // 正在播放
-        Column() {
-          Row() {
-            Text('▶️')
-              .fontSize(14)
-            Text('正在接收投屏')
-              .fontSize(13)
-              .fontColor('#10B981')
-              .margin({ left: 12 })
-          }
-          .width('100%')
-
-          // URL可编辑文本框
-          TextInput({ text: this.dlnaUri })
-            .fontSize(11)
-            .fontColor('#94A3B8')
-            .backgroundColor('#0F172A')
-            .borderColor('#334155')
-            .borderRadius(8)
-            .height(60)
-            .margin({ top: 8 })
-            .onChange((value: string) => {
-              this.dlnaUri = value
-            })
-        }
-        .width('100%')
-        .padding(12)
-        .backgroundColor('#1E293B')
-        .borderRadius(10)
-      } else {
-        // 等待投屏
-        Row() {
-          Text('⏸')
-            .fontSize(14)
-          Text('等待DLNA投屏...')
-            .fontSize(13)
-            .fontColor('#94A3B8')
-        }
-        .width('100%')
-        .padding(12)
-        .backgroundColor('#1E293B')
-        .borderRadius(10)
-      }
-    }
-    .width('100%')
-    .padding(16)
-    .backgroundColor('#1E293B')
-    .borderRadius(16)
-  }
-
-  // ===== 播放模式选择卡片 =====
-  @Builder
-  PlaybackModeCard() {
-    Column() {
-      Text('播放模式')
-        .fontSize(16)
-        .fontWeight(FontWeight.Medium)
-        .fontColor('#F1F5F9')
-        .width('100%')
-
-      Row() {
-        // 仅音频模式
-        Column() {
-          Text('🔊')
-            .fontSize(24)
-          Text('仅音频')
-            .fontSize(13)
-            .fontColor(this.playbackMode === 'audio_only' ? '#FFFFFF' : '#94A3B8')
-            .margin({ top: 4 })
-          if (this.playbackMode === 'audio_only') {
-            Text('✓')
-              .fontSize(14)
-              .fontColor('#FFFFFF')
-              .fontWeight(FontWeight.Bold)
-          }
-        }
-        .width('48%')
-        .padding(14)
-        .borderRadius(12)
-        .backgroundColor(this.playbackMode === 'audio_only' ? '#6366F1' : '#334155')
-        .onClick(() => {
-          this.playbackMode = 'audio_only'
-          this.videoPlayer.setPlaybackMode('audio_only')
-        })
-
-        // 视频+音频模式
-        Column() {
-          Text('🎬')
-            .fontSize(24)
-          Text('视频+音频')
-            .fontSize(13)
-            .fontColor(this.playbackMode === 'video_audio' ? '#FFFFFF' : '#94A3B8')
-            .margin({ top: 4 })
-          if (this.playbackMode === 'video_audio') {
-            Text('✓')
-              .fontSize(14)
-              .fontColor('#FFFFFF')
-              .fontWeight(FontWeight.Bold)
-          }
-        }
-        .width('48%')
-        .padding(14)
-        .borderRadius(12)
-        .backgroundColor(this.playbackMode === 'video_audio' ? '#10B981' : '#334155')
-        .onClick(() => {
-          this.playbackMode = 'video_audio'
-          this.videoPlayer.setPlaybackMode('video_audio')
-        })
-      }
-      .width('100%')
-      .justifyContent(FlexAlign.SpaceBetween)
-    }
-    .width('100%')
-    .padding(16)
-    .backgroundColor('#1E293B')
-    .borderRadius(16)
-  }
-
-  // ===== 播放控制卡片 =====
-  @Builder
-  PlaybackControlCard() {
-    Column() {
-      // 标题
-      Row() {
-        Text('播放控制')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#F1F5F9')
-        Blank()
-        // 播放状态指示
-        Row() {
-          Circle()
-            .width(8)
-            .height(8)
-            .fill(this.dlnaIsPlaying ? '#10B981' : '#64748B')
-          Text(this.dlnaIsPlaying ? '播放中' : '已暂停')
-            .fontSize(12)
-            .fontColor(this.dlnaIsPlaying ? '#10B981' : '#94A3B8')
-            .margin({ left: 6 })
-        }
-      }
-      .width('100%')
-      .margin({ bottom: 16 })
-
-      // 视频显示区域 - 使用Video组件
-      if (this.dlnaUri.length > 0) {
-        Video({
-          src: this.dlnaUri,
-          controller: this.mainVideoController
-        })
-          .width('100%')
-          .aspectRatio(16 / 9)
-          .backgroundColor('#000000')
-          .borderRadius(12)
-          .autoPlay(true)  // 自动播放
-          .controls(true)  // 显示控制条
-          .loop(false)
-          .muted(false)
-          .objectFit(ImageFit.Contain)
-          .onStart(() => {
-            hilog.info(DOMAIN, TAG, '主视频开始播放')
-            this.dlnaIsPlaying = true
-          })
-          .onPause(() => {
-            hilog.info(DOMAIN, TAG, '主视频暂停')
-            this.dlnaIsPlaying = false
-          })
-          .onFinish(() => {
-            hilog.info(DOMAIN, TAG, '主视频播放完成')
-            this.dlnaIsPlaying = false
-          })
-          .onError((error) => {
-            hilog.error(DOMAIN, TAG, `主视频播放错误: ${JSON.stringify(error)}`)
-          })
-          .onPrepared((info: PreparedInfo) => {
-            hilog.info(DOMAIN, TAG, `主视频准备完成，时长: ${info.duration}ms`)
-            this.dlnaDuration = info.duration
-            this.mainVideoPrepared = true
-          })
-          .onSeeking((time) => {
-            hilog.info(DOMAIN, TAG, `主视频跳转到: ${time}ms`)
-          })
-          .onSeeked((info: PlaybackInfo) => {
-            hilog.info(DOMAIN, TAG, `主视频跳转完成: ${info.time}ms`)
-            this.dlnaPosition = info.time
-          })
-          .onUpdate((info: PlaybackInfo) => {
-            // 更新手机实际播放进度
-            this.phoneActualPosition = info.time
-          })
-          .margin({ bottom: 16 })
-      } else {
-        // 等待URL
-        Text('等待接收投屏URL...')
-          .width('100%')
-          .aspectRatio(16 / 9)
-          .fontSize(14)
-          .fontColor('#94A3B8')
-          .backgroundColor('#000000')
-          .borderRadius(12)
-          .textAlign(TextAlign.Center)
-          .margin({ bottom: 16 })
-      }
-    }
-    .width('100%')
-    .padding(16)
-    .backgroundColor('#1E293B')
-    .borderRadius(16)
-    .margin({ top: 12 })
-  }
-
-  // ===== 独立视频播放测试卡片 =====
-  @Builder
-  TestVideoPlayerCard() {
-    Column() {
-      Text('视频播放测试')
-        .fontSize(16)
-        .fontWeight(FontWeight.Medium)
-        .fontColor('#F1F5F9')
-        .width('100%')
-        .margin({ bottom: 12 })
-
-      // 视频显示区域 - 使用Video组件
-      if (this.dlnaUri.length > 0) {
-        Video({
-          src: this.dlnaUri,
-          controller: this.testVideoController
-        })
-          .width('100%')
-          .aspectRatio(16 / 9)
-          .backgroundColor('#000000')
-          .borderRadius(12)
-          .autoPlay(false)
-          .controls(true)
-          .loop(false)
-          .muted(false)
-          .objectFit(ImageFit.Contain)
-          .onStart(() => {
-            hilog.info(DOMAIN, TAG, '视频开始播放')
-            this.testVideoPlaying = true
-          })
-          .onPause(() => {
-            hilog.info(DOMAIN, TAG, '视频暂停')
-            this.testVideoPlaying = false
-          })
-          .onFinish(() => {
-            hilog.info(DOMAIN, TAG, '视频播放完成')
-            this.testVideoPlaying = false
-          })
-          .onError((error) => {
-            hilog.error(DOMAIN, TAG, `视频播放错误: ${JSON.stringify(error)}`)
-          })
-          .onPrepared((info: PreparedInfo) => {
-            hilog.info(DOMAIN, TAG, `视频准备完成，时长: ${info.duration}ms`)
-            this.testVideoDuration = info.duration
-          })
-          .onSeeking((time) => {
-            hilog.info(DOMAIN, TAG, `视频跳转到: ${time}ms`)
-          })
-          .onSeeked((info: PlaybackInfo) => {
-            hilog.info(DOMAIN, TAG, `视频跳转完成: ${info.time}ms`)
-            this.testVideoProgress = info.time
-          })
-          .onUpdate((info: PlaybackInfo) => {
-            this.testVideoProgress = info.time
-          })
-          .margin({ bottom: 12 })
-      } else {
-        // 等待URL
-        Text('等待接收投屏URL...')
-          .width('100%')
-          .aspectRatio(16 / 9)
-          .fontSize(14)
-          .fontColor('#94A3B8')
-          .backgroundColor('#000000')
-          .borderRadius(12)
-          .textAlign(TextAlign.Center)
-          .margin({ bottom: 12 })
-      }
-
-      // 播放控制提示
-      Text('使用视频播放器内置控制条播放')
-        .fontSize(12)
-        .fontColor('#94A3B8')
-        .width('100%')
-        .textAlign(TextAlign.Center)
-    }
-    .width('100%')
-    .padding(16)
-    .backgroundColor('#1E293B')
-    .borderRadius(16)
-    .margin({ top: 12 })
-  }
-
-  // ===== 同步状态卡片 =====
-  @Builder
-  SyncStatusCard() {
-    Column() {
-      Text('车机同步')
-        .fontSize(16)
-        .fontWeight(FontWeight.Medium)
-        .fontColor('#F1F5F9')
-        .width('100%')
-
-      Row() {
-        Text('🔗')
-          .fontSize(14)
-        Text(`已连接: ${this.carIpAddress}`)
-          .fontSize(13)
-          .fontColor('#10B981')
-          .margin({ left: 12 })
-      }
-      .width('100%')
-      .padding(12)
-      .backgroundColor('#1E293B')
-      .borderRadius(10)
-    }
-    .width('100%')
-    .padding(16)
-    .backgroundColor('#1E293B')
-    .borderRadius(16)
-    .margin({ top: 12 })
-  }
-
-  // ===== 服务状态卡片 =====
-  @Builder
-  ServiceStatusCard() {
-    Column() {
-      Text('服务状态')
-        .fontSize(16)
-        .fontWeight(FontWeight.Medium)
-        .fontColor('#F1F5F9')
-        .width('100%')
-
-      Row() {
-        Text('SSDP:')
-          .fontSize(13)
-          .fontColor('#94A3B8')
-        Text(this.ssdpRunning ? '运行中' : '已停止')
-          .fontSize(13)
-          .fontColor(this.ssdpRunning ? '#10B981' : '#64748B')
-          .margin({ left: 8 })
-        Blank()
-        Text('HTTP:')
-          .fontSize(13)
-          .fontColor('#94A3B8')
-        Text(this.dlnaHttpRunning ? '运行中' : '已停止')
-          .fontSize(13)
-          .fontColor(this.dlnaHttpRunning ? '#10B981' : '#64748B')
-          .margin({ left: 8 })
-        Blank()
-        Text('发现响应:')
-          .fontSize(13)
-          .fontColor('#94A3B8')
-        Text(this.discoveryResponseRunning ? '运行中' : '已停止')
-          .fontSize(13)
-          .fontColor(this.discoveryResponseRunning ? '#10B981' : '#64748B')
-      }
-      .width('100%')
-    }
-    .width('100%')
-    .padding(16)
-    .backgroundColor('#1E293B')
-    .borderRadius(16)
-    .margin({ top: 12 })
   }
 }
