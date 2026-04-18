@@ -48,6 +48,10 @@ export class CarWebSocketClient {
   // 🔧 修复内存泄漏：添加重连定时器ID
   private reconnectTimeoutId: number = -1
 
+  // 命令循环避免：缓存已处理的命令ID（10秒TTL）
+  private processedCommands: Map<string, number> = new Map()
+  private commandCleanupTimer: number = -1
+
   // 播放回调
   private onPlayCommandCallback: ((uri: string, httpHeaders: Record<string, string>) => void) | null = null
   private onPlayAndSeekCallback: ((uri: string, httpHeaders: Record<string, string>, position: number) => void) | null = null
@@ -93,6 +97,9 @@ export class CarWebSocketClient {
 
           // 启动心跳
           this.startHeartbeat()
+
+          // 启动命令缓存清理定时器
+          this.startCommandCleanup()
 
           // 通知连接成功
           this.onConnectedCallback?.()
@@ -384,6 +391,97 @@ export class CarWebSocketClient {
   }
 
   /**
+   * 发送控制命令到车机端（用于双向同步）
+   * @param action 命令类型（play, pause, stop, seek, switch_output）
+   * @param data 命令数据（可选）
+   */
+  sendControlCommand(action: string, data?: Record<string, Object>): void {
+    const syncId = this.generateSyncId()
+
+    // 创建data对象，确保有默认值
+    const controlData: Record<string, Object> = data || {} as Record<string, Object>
+
+    // 添加syncId和source
+    controlData['syncId'] = syncId
+    controlData['source'] = 'phone'
+
+    const message: WebSocketMessage = {
+      type: 'control_command',
+      action: action,
+      data: controlData,
+      timestamp: Date.now()
+    }
+
+    hilog.info(DOMAIN, TAG, `发送控制命令到车机端: action=${action}, syncId=${syncId}`)
+    this.sendMessage(message)
+
+    // 标记命令已处理（避免循环）
+    this.markCommandProcessed(syncId)
+  }
+
+  /**
+   * 生成唯一的syncId
+   */
+  private generateSyncId(): string {
+    return `phone_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`
+  }
+
+  /**
+   * 检查命令是否已处理
+   */
+  private isCommandProcessed(syncId: string): boolean {
+    const timestamp = this.processedCommands.get(syncId)
+    if (!timestamp) {
+      return false
+    }
+    // 检查是否在10秒内
+    const age = Date.now() - timestamp
+    return age < 10000
+  }
+
+  /**
+   * 标记命令已处理
+   */
+  private markCommandProcessed(syncId: string): void {
+    this.processedCommands.set(syncId, Date.now())
+    hilog.debug(DOMAIN, TAG, `标记命令已处理: syncId=${syncId}`)
+  }
+
+  /**
+   * 启动命令缓存清理定时器
+   */
+  private startCommandCleanup(): void {
+    this.commandCleanupTimer = setInterval(() => {
+      const now = Date.now()
+      const expiredKeys: string[] = []
+
+      this.processedCommands.forEach((timestamp: number, syncId: string) => {
+        if (now - timestamp > 10000) { // 10秒TTL
+          expiredKeys.push(syncId)
+        }
+      })
+
+      expiredKeys.forEach((key: string) => {
+        this.processedCommands.delete(key)
+      })
+
+      if (expiredKeys.length > 0) {
+        hilog.debug(DOMAIN, TAG, `清理了${expiredKeys.length}个过期命令缓存`)
+      }
+    }, 10000) // 每10秒清理一次
+  }
+
+  /**
+   * 停止命令缓存清理定时器
+   */
+  private stopCommandCleanup(): void {
+    if (this.commandCleanupTimer !== -1) {
+      clearInterval(this.commandCleanupTimer)
+      this.commandCleanupTimer = -1
+    }
+  }
+
+  /**
    * 发送状态更新到车机端
    */
   sendStateUpdate(position: number, duration: number, isPlaying: boolean): void {
@@ -464,6 +562,10 @@ export class CarWebSocketClient {
 
     this.isConnected = false
     this.stopHeartbeat()
+    this.stopCommandCleanup()
+
+    // 清空命令缓存
+    this.processedCommands.clear()
 
     // 🔧 修复内存泄漏：清理重连定时器
     if (this.reconnectTimeoutId !== -1) {

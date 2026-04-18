@@ -422,12 +422,15 @@ class ComposeMainActivity : AppCompatActivity() {
             val success = if (newMode == "phone") {
                 // 切换到手机端
                 Log.i("ComposeMainActivity", "调用switchOutputMode(PHONE)")
-                // 检查当前视频URI是否已设置
-                val currentUri = audioOutputController.getCurrentVideoUri()
-                Log.i("ComposeMainActivity", "当前视频URI: ${currentUri.take(50)}..., 长度: ${currentUri.length}")
+                // 检查是否有正在播放的视频（使用uiState而不是audioOutputController，确保状态同步）
+                val currentUrl = uiState.value.currentVideoUrl
+                val isPlaying = uiState.value.isPlaying
 
-                if (currentUri.isEmpty()) {
-                    Log.e("ComposeMainActivity", "错误：没有视频URI，请先投屏视频")
+                Log.i("ComposeMainActivity", "当前视频URL: ${currentUrl.take(50)}..., 长度: ${currentUrl.length}")
+                Log.i("ComposeMainActivity", "当前播放状态: $isPlaying")
+
+                if (currentUrl.isEmpty() || !isPlaying) {
+                    Log.e("ComposeMainActivity", "错误：没有正在播放的视频")
                     withContext(Dispatchers.Main) {
                         Toast.makeText(
                             this@ComposeMainActivity,
@@ -495,8 +498,17 @@ class ComposeMainActivity : AppCompatActivity() {
             webSocketServer.start()
             Log.i("ComposeMainActivity", "WebSocket服务器已启动，监听端口9999")
             Log.i("ComposeMainActivity", "WebSocket服务器绑定地址: ${webSocketServer.address}")
+
+            // 更新UI状态
+            lifecycleScope.launch(Dispatchers.Main) {
+                _uiState.value = uiState.value.copy(isWebSocketServerRunning = true)
+            }
         } catch (e: Exception) {
             Log.e("ComposeMainActivity", "WebSocket服务器启动失败", e)
+            // 更新UI状态
+            lifecycleScope.launch(Dispatchers.Main) {
+                _uiState.value = uiState.value.copy(isWebSocketServerRunning = false)
+            }
             throw e
         }
     }
@@ -514,6 +526,11 @@ class ComposeMainActivity : AppCompatActivity() {
                         webSocketServer.isRunning
                     } catch (e: Exception) {
                         false
+                    }
+
+                    // 更新UI状态
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        _uiState.value = uiState.value.copy(isWebSocketServerRunning = isRunning)
                     }
 
                     if (!isRunning) {
@@ -570,6 +587,19 @@ class ComposeMainActivity : AppCompatActivity() {
             }
         }
 
+        // 设置控制命令回调（处理来自手机端的播放控制命令）
+        webSocketServer.onControlCommand = { action, data, syncId, clientId ->
+            Log.i("ComposeMainActivity", "收到手机端控制命令: action=$action, syncId=$syncId, clientId=$clientId")
+            lifecycleScope.launch {
+                try {
+                    // 转发到AudioOutputController处理
+                    audioOutputController.executeRemoteCommand(action, data, syncId)
+                } catch (e: Exception) {
+                    Log.e("ComposeMainActivity", "执行远程命令失败: ${e.message}")
+                }
+            }
+        }
+
         // 处理来自手机端的消息
         webSocketServer.onMessageReceived = { message, ws ->
             try {
@@ -613,6 +643,87 @@ class ComposeMainActivity : AppCompatActivity() {
                 Log.e("ComposeMainActivity", "解析手机端消息失败: ${e.message}")
             }
         }
+
+        // 检查是否已有客户端连接（用于UI启动时的状态同步）
+        lifecycleScope.launch(Dispatchers.Main) {
+            val currentClientCount = webSocketServer.getClientCount()
+            if (currentClientCount > 0) {
+                Log.i("ComposeMainActivity", "检测到已有 $currentClientCount 个客户端连接")
+                _uiState.value = uiState.value.copy(
+                    connectedPhoneDevice = "FSCast Remote",
+                    webSocketClientCount = currentClientCount
+                )
+            }
+        }
+    }
+
+    /**
+     * 清理旧的FSCast进程（避免端口占用）
+     * 增强版：多次检查，确保端口完全释放
+     */
+    private suspend fun cleanupOldFSCastProcesses() {
+        try {
+            // 获取当前进程ID和包名
+            val myPid = android.os.Process.myPid()
+            val myPackageName = packageName
+            Log.i("ComposeMainActivity", "========================================")
+            Log.i("ComposeMainActivity", "清理旧FSCast进程（增强版）")
+            Log.i("ComposeMainActivity", "当前进程ID: $myPid, 包名: $myPackageName")
+            Log.i("ComposeMainActivity", "========================================")
+
+            // 查找所有FSCast进程
+            val activityManager = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
+            var pass = 0
+            var foundOldProcesses = true
+
+            // 最多清理3次，确保所有旧进程都被杀死
+            while (foundOldProcesses && pass < 3) {
+                pass++
+                Log.i("ComposeMainActivity", "清理第 $pass 轮")
+
+                val runningProcesses = activityManager.runningAppProcesses
+                val oldProcesses = mutableListOf<Int>()
+
+                for (processInfo in runningProcesses) {
+                    if (processInfo.processName != null &&
+                        processInfo.processName.contains("floatingscreencasting")) {
+                        val pid = processInfo.pid
+                        // 跳过当前进程
+                        if (pid != myPid) {
+                            oldProcesses.add(pid)
+                            Log.i("ComposeMainActivity", "发现旧FSCast进程: $pid (${processInfo.processName})")
+                        }
+                    }
+                }
+
+                // 杀死所有旧进程
+                if (oldProcesses.isNotEmpty()) {
+                    Log.i("ComposeMainActivity", "发现 ${oldProcesses.size} 个旧FSCast进程，准备清理")
+                    oldProcesses.forEach { pid ->
+                        try {
+                            Log.i("ComposeMainActivity", "杀死旧进程: $pid")
+                            android.os.Process.killProcess(pid)
+                        } catch (e: Exception) {
+                            Log.w("ComposeMainActivity", "杀死进程 $pid 失败: ${e.message}")
+                        }
+                    }
+
+                    // 每次杀死后等待1秒
+                    delay(1000)
+                    foundOldProcesses = true
+                } else {
+                    Log.i("ComposeMainActivity", "第 $pass 轮：没有发现旧FSCast进程")
+                    foundOldProcesses = false
+                }
+            }
+
+            // 额外等待时间，确保TCP端口完全释放（TIME_WAIT状态）
+            Log.i("ComposeMainActivity", "等待TCP端口完全释放...")
+            delay(3000)
+            Log.i("ComposeMainActivity", "旧进程清理完成，端口已释放")
+        } catch (e: Exception) {
+            Log.e("ComposeMainActivity", "清理旧进程失败", e)
+        }
     }
 
     /**
@@ -630,24 +741,34 @@ class ComposeMainActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                // 停止现有的WebSocket服务器
+                // 步骤1: 清理旧FSCast进程（包含等待端口释放）
+                cleanupOldFSCastProcesses()
+
+                // 步骤2: 停止现有的WebSocket服务器
                 if (::webSocketServer.isInitialized) {
                     Log.i("ComposeMainActivity", "停止现有的WebSocket服务器")
                     webSocketServer.stop()
-                    delay(1000) // 等待服务器完全停止
+                    delay(2000) // 等待服务器完全停止和端口释放
+
+                    // 更新UI状态为停止
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        _uiState.value = uiState.value.copy(isWebSocketServerRunning = false)
+                    }
                 }
 
-                // 创建新的WebSocket服务器实例
+                // 步骤3: 创建新的WebSocket服务器实例
+                Log.i("ComposeMainActivity", "创建新的WebSocket服务器实例")
                 webSocketServer = com.example.floatingscreencasting.websocket.CarWebSocketServer(9999)
 
-                // 启动WebSocket服务器
+                // 步骤4: 启动WebSocket服务器
                 startWebSocketServer()
 
-                // 重新设置回调
+                // 步骤5: 重新设置回调
                 setupWebSocketCallbacks()
 
-                // 更新AudioOutputController的WebSocket服务器引用
-                audioOutputController = AudioOutputController(dlnaDmcClient, phoneDeviceManager, webSocketServer)
+                // 步骤6: 更新AudioOutputController的WebSocket服务器引用
+                audioOutputController.updateWebSocketServer(webSocketServer)
+                Log.i("ComposeMainActivity", "已更新AudioOutputController的WebSocket服务器引用")
 
                 // 在主线程显示成功消息
                 withContext(Dispatchers.Main) {
@@ -1000,9 +1121,16 @@ class ComposeMainActivity : AppCompatActivity() {
 
         // 立即启动WebSocket服务器
         lifecycleScope.launch(Dispatchers.IO) {
+            // 步骤1: 清理旧FSCast进程（避免端口占用）
+            cleanupOldFSCastProcesses()
+
+            // 步骤2: 启动WebSocket服务器
             startWebSocketServer()
 
-            // 启动WebSocket监控线程，自动重启
+            // 步骤3: 设置WebSocket回调（必须在启动后立即设置）
+            setupWebSocketCallbacks()
+
+            // 步骤4: 启动WebSocket监控线程，自动重启
             startWebSocketMonitor()
         }
 

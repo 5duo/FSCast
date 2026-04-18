@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -19,7 +20,7 @@ import kotlinx.coroutines.withContext
 class AudioOutputController(
     private val dlnaDmcClient: DlnaControlPoint,
     private val phoneDeviceManager: PhoneDeviceManager,
-    private val webSocketServer: CarWebSocketServer? = null
+    webSocketServer: CarWebSocketServer? = null
 ) {
 
     companion object {
@@ -39,6 +40,19 @@ class AudioOutputController(
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var syncJob: Job? = null
+
+    // WebSocket服务器引用（可更新，用于服务器重启场景）
+    private var webSocketServer: CarWebSocketServer? = webSocketServer
+
+    // 命令循环避免：缓存已处理的命令ID（10秒TTL）
+    private val processedCommands = mutableMapOf<String, Long>()
+    private val commandCleanupJob = scope.launch {
+        while (isActive) {
+            delay(10000) // 每10秒清理一次过期缓存
+            val now = System.currentTimeMillis()
+            processedCommands.entries.removeIf { (_, timestamp) -> now - timestamp > 10000 }
+        }
+    }
 
     // 播放状态监听器
     interface PlaybackStateListener {
@@ -95,22 +109,23 @@ class AudioOutputController(
                 // 只使用WebSocket通信
                 Log.i(TAG, "========================================")
                 Log.i(TAG, "切换到手机模式，检查WebSocket连接状态...")
-                Log.i(TAG, "webSocketServer是否为null: ${webSocketServer == null}")
-                if (webSocketServer != null) {
-                    Log.i(TAG, "已连接客户端数量: ${webSocketServer.getClientCount()}")
-                    Log.i(TAG, "已连接客户端列表: ${webSocketServer.getConnectedClients()}")
+                val server = webSocketServer
+                Log.i(TAG, "webSocketServer是否为null: ${server == null}")
+                if (server != null) {
+                    Log.i(TAG, "已连接客户端数量: ${server.getClientCount()}")
+                    Log.i(TAG, "已连接客户端列表: ${server.getConnectedClients()}")
                 }
                 Log.i(TAG, "当前视频URI: ${currentVideoUri.take(50)}...")
                 Log.i(TAG, "当前视频URI长度: ${currentVideoUri.length}")
                 Log.i(TAG, "HTTP头数量: ${currentHttpHeaders.size}")
                 Log.i(TAG, "========================================")
 
-                if (webSocketServer == null) {
+                if (server == null) {
                     Log.e(TAG, "WebSocket服务器未初始化")
                     return false
                 }
 
-                if (!webSocketServer.hasConnectedClients()) {
+                if (!server.hasConnectedClients()) {
                     Log.w(TAG, "没有WebSocket客户端连接")
                     return false
                 }
@@ -131,7 +146,7 @@ class AudioOutputController(
                     Log.i(TAG, "视频URI: ${currentVideoUri.take(100)}...")
                     Log.i(TAG, "HTTP头数量: ${currentHttpHeaders.size}")
 
-                    val sentCount = webSocketServer.sendPlayCommandWithPosition(
+                    val sentCount = server.sendPlayCommandWithPosition(
                         currentVideoUri,
                         currentHttpHeaders,
                         currentPositionMs
@@ -153,7 +168,7 @@ class AudioOutputController(
                     // 车机端开始播放（静音状态）
                     playbackStateListener?.onPlay()
                     // 同时发送命令到手机端
-                    webSocketServer.sendResumeCommand()
+                    server.sendResumeCommand()
                     Log.i(TAG, "两端同步启动完成")
                 } else {
                     Log.e(TAG, "========================================")
@@ -203,8 +218,12 @@ class AudioOutputController(
 
     /**
      * 播放
+     * @param phonePositionMs 手机端跳转位置（可选）
+     * @param syncId 命令唯一ID，用于避免循环（null表示UI触发，非null表示远程命令）
      */
-    suspend fun play(phonePositionMs: Long = 0): Boolean {
+    suspend fun play(phonePositionMs: Long = 0, syncId: String? = null): Boolean {
+        Log.d(TAG, "play调用: phonePositionMs=$phonePositionMs, syncId=$syncId, mode=$currentMode")
+
         return when (currentMode) {
             OutputMode.SPEAKER -> {
                 playbackStateListener?.onPlay()
@@ -212,13 +231,14 @@ class AudioOutputController(
             }
             OutputMode.PHONE -> {
                 // 优先使用WebSocket通信
-                if (webSocketServer != null && webSocketServer.hasConnectedClients()) {
+                val server = webSocketServer
+                if (server != null && server.hasConnectedClients()) {
                     // 如果需要跳转，先跳转再播放
                     if (phonePositionMs > 0) {
-                        webSocketServer.sendSeekCommand(phonePositionMs)
+                        server.sendSeekCommand(phonePositionMs)
                     }
 
-                    val sentCount = webSocketServer.sendPlayCommand(currentVideoUri, currentHttpHeaders)
+                    val sentCount = server.sendPlayCommand(currentVideoUri, currentHttpHeaders)
                     if (sentCount > 0) {
                         startProgressSync()
                         return true
@@ -252,8 +272,11 @@ class AudioOutputController(
 
     /**
      * 暂停
+     * @param syncId 命令唯一ID，用于避免循环（null表示UI触发，非null表示远程命令）
      */
-    suspend fun pause(): Boolean {
+    suspend fun pause(syncId: String? = null): Boolean {
+        Log.d(TAG, "pause调用: syncId=$syncId, mode=$currentMode")
+
         return when (currentMode) {
             OutputMode.SPEAKER -> {
                 playbackStateListener?.onPause()
@@ -261,8 +284,9 @@ class AudioOutputController(
             }
             OutputMode.PHONE -> {
                 // 优先使用WebSocket通信
-                if (webSocketServer != null && webSocketServer.hasConnectedClients()) {
-                    val sentCount = webSocketServer.sendPauseCommand()
+                val server = webSocketServer
+                if (server != null && server.hasConnectedClients()) {
+                    val sentCount = server.sendPauseCommand()
                     if (sentCount > 0) {
                         stopProgressSync()
                         return true
@@ -288,8 +312,10 @@ class AudioOutputController(
 
     /**
      * 停止
+     * @param syncId 命令唯一ID，用于避免循环（null表示UI触发，非null表示远程命令）
      */
-    suspend fun stop(): Boolean {
+    suspend fun stop(syncId: String? = null): Boolean {
+        Log.d(TAG, "stop调用: syncId=$syncId, mode=$currentMode")
         stopProgressSync()
 
         return when (currentMode) {
@@ -299,8 +325,9 @@ class AudioOutputController(
             }
             OutputMode.PHONE -> {
                 // 优先使用WebSocket通信
-                if (webSocketServer != null && webSocketServer.hasConnectedClients()) {
-                    val sentCount = webSocketServer.sendStopCommand()
+                val server = webSocketServer
+                if (server != null && server.hasConnectedClients()) {
+                    val sentCount = server.sendStopCommand()
                     return sentCount > 0
                 }
 
@@ -323,8 +350,12 @@ class AudioOutputController(
 
     /**
      * 跳转
+     * @param positionMs 跳转位置（毫秒）
+     * @param syncId 命令唯一ID，用于避免循环（null表示UI触发，非null表示远程命令）
      */
-    suspend fun seek(positionMs: Long): Boolean {
+    suspend fun seek(positionMs: Long, syncId: String? = null): Boolean {
+        Log.d(TAG, "seek调用: positionMs=$positionMs, syncId=$syncId, mode=$currentMode")
+
         return when (currentMode) {
             OutputMode.SPEAKER -> {
                 playbackStateListener?.onSeek(positionMs)
@@ -332,8 +363,9 @@ class AudioOutputController(
             }
             OutputMode.PHONE -> {
                 // 优先使用WebSocket通信
-                if (webSocketServer != null && webSocketServer.hasConnectedClients()) {
-                    val sentCount = webSocketServer.sendSeekCommand(positionMs)
+                val server = webSocketServer
+                if (server != null && server.hasConnectedClients()) {
+                    val sentCount = server.sendSeekCommand(positionMs)
                     return sentCount > 0
                 }
 
@@ -359,7 +391,13 @@ class AudioOutputController(
     private fun startProgressSync() {
         syncJob?.cancel()
         syncJob = scope.launch {
-            while (webSocketServer != null && webSocketServer.hasConnectedClients()) {
+            while (true) {
+                val server = webSocketServer
+                if (server == null || !server.hasConnectedClients()) {
+                    Log.d(TAG, "进度同步: 无手机端连接，停止同步")
+                    break
+                }
+
                 delay(PROGRESS_CHECK_INTERVAL_MS) // 每5秒检查一次
 
                 // 获取车机端当前播放进度
@@ -367,9 +405,9 @@ class AudioOutputController(
                 Log.d(TAG, "进度同步定时器: mode=$currentMode, position=${currentPosition}ms")
 
                 // 发送给手机端
-                if (webSocketServer != null && webSocketServer.hasConnectedClients()) {
+                if (server != null && server.hasConnectedClients()) {
                     Log.d(TAG, "进度检查: 发送车机进度 ${currentPosition}ms 到手机端")
-                    webSocketServer.sendProgressUpdate(
+                    server.sendProgressUpdate(
                         currentPosition,
                         0,  // duration不需要（手机端从视频流获取）
                         true  // isPlaying不需要精确判断
@@ -396,10 +434,11 @@ class AudioOutputController(
      * 在投屏开始时调用
      */
     private fun sendInitialProgress() {
-        if (webSocketServer != null && webSocketServer.hasConnectedClients()) {
+        val server = webSocketServer
+        if (server != null && server.hasConnectedClients()) {
             val currentPosition = playbackStateListener?.getCurrentPosition() ?: 0L
             Log.i(TAG, "发送初始进度: ${currentPosition}ms")
-            webSocketServer.sendProgressUpdate(currentPosition, 0, true)
+            server.sendProgressUpdate(currentPosition, 0, true)
         }
     }
 
@@ -407,11 +446,79 @@ class AudioOutputController(
      * 停止手机端播放
      */
     private suspend fun stopPhonePlayback() {
-        val device = phoneDeviceManager.getSelectedDevice()
-        if (device != null) {
-            dlnaDmcClient.stop(device)
+        // 使用WebSocket停止手机端播放
+        val server = webSocketServer
+        if (server != null && server.hasConnectedClients()) {
+            Log.i(TAG, "发送stop命令到手机端")
+            server.sendStopCommand()
         }
         stopProgressSync()
+    }
+
+    /**
+     * 执行来自手机端的远程命令
+     * @param action 命令类型（play, pause, stop, seek, switch_output）
+     * @param data 命令数据（JSON对象）
+     * @param syncId 命令唯一ID，用于避免循环
+     */
+    suspend fun executeRemoteCommand(action: String, data: org.json.JSONObject, syncId: String) {
+        // 检查命令是否已处理（避免循环）
+        if (isCommandProcessed(syncId)) {
+            Log.d(TAG, "忽略重复命令: syncId=$syncId")
+            return
+        }
+
+        // 标记命令已处理
+        markCommandProcessed(syncId)
+
+        Log.i(TAG, "执行远程命令: action=$action, syncId=$syncId, mode=$currentMode")
+
+        when (action) {
+            "play" -> {
+                // 远程播放命令：在车机端播放，同时同步到手机端
+                play(syncId = syncId)
+            }
+            "pause" -> {
+                // 远程暂停命令：暂停车机端，同时同步到手机端
+                pause(syncId = syncId)
+            }
+            "stop" -> {
+                // 远程停止命令：停止车机端，同时同步到手机端
+                stop(syncId = syncId)
+            }
+            "seek" -> {
+                // 远程跳转命令：跳转车机端进度，同时同步到手机端
+                val positionMs = data.optLong("position", 0)
+                seek(positionMs, syncId)
+            }
+            "switch_output" -> {
+                // 远程切换音频输出命令
+                val modeStr = data.optString("mode", "speaker")
+                val newMode = if (modeStr == "phone") OutputMode.PHONE else OutputMode.SPEAKER
+                switchOutputMode(newMode)
+            }
+            else -> {
+                Log.w(TAG, "未知的远程命令: $action")
+            }
+        }
+    }
+
+    /**
+     * 检查命令是否已处理
+     */
+    private fun isCommandProcessed(syncId: String): Boolean {
+        val timestamp = processedCommands[syncId] ?: return false
+        // 检查是否在10秒内
+        val age = System.currentTimeMillis() - timestamp
+        return age < 10000
+    }
+
+    /**
+     * 标记命令已处理
+     */
+    private fun markCommandProcessed(syncId: String) {
+        processedCommands[syncId] = System.currentTimeMillis()
+        Log.d(TAG, "标记命令已处理: syncId=$syncId")
     }
 
     /**
@@ -419,6 +526,16 @@ class AudioOutputController(
      */
     fun release() {
         stopProgressSync()
+        commandCleanupJob.cancel()
         Log.i(TAG, "AudioOutputController已释放")
+    }
+
+    /**
+     * 更新WebSocket服务器引用
+     * 用于WebSocket服务器重启后更新引用，而不是重新创建整个控制器
+     */
+    fun updateWebSocketServer(webSocketServer: CarWebSocketServer?) {
+        this.webSocketServer = webSocketServer
+        Log.i(TAG, "WebSocket服务器引用已更新")
     }
 }

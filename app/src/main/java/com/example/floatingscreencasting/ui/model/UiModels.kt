@@ -35,7 +35,7 @@ data class MainUiState(
     val isFloatingWindowEnabled: Boolean = true,
 
     // WebSocket服务器运行状态
-    val isWebSocketServerRunning: Boolean = true
+    val isWebSocketServerRunning: Boolean = false  // 默认false，启动成功后更新为true
 )
 
 /**

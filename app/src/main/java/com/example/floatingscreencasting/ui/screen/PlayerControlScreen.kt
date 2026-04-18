@@ -76,6 +76,7 @@ fun PlayerControlScreen(
                 selectedDisplayId = uiState.selectedDisplayId,
                 availableDisplays = uiState.availableDisplays,
                 isFloatingWindowEnabled = uiState.isFloatingWindowEnabled,
+                webSocketConnected = uiState.webSocketClientCount > 0,  // WebSocket连接状态
                 onPlayPause = onPlayPause,
                 onStop = onStop,
                 onPrevious = onPrevious,

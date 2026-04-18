@@ -76,6 +76,7 @@ fun ModernPlaybackControlCard(
                 currentMode = audioOutputMode,
                 connectedDevice = connectedPhoneDevice,
                 deviceCount = phoneDeviceCount,
+                webSocketConnected = phoneDeviceCount > 0,  // 是否有WebSocket客户端连接
                 onModeChange = onAudioOutputChange,
                 onScanDevices = onScanDevices
             )
@@ -116,6 +117,7 @@ private fun AudioOutputSelector(
     currentMode: String,
     connectedDevice: String?,
     deviceCount: Int,
+    webSocketConnected: Boolean = false,  // WebSocket连接状态
     onModeChange: () -> Unit,
     onScanDevices: () -> Unit
 ) {
@@ -209,7 +211,8 @@ private fun AudioOutputSelector(
         Surface(
             onClick = onModeChange,
             shape = RoundedCornerShape(8.dp),
-            color = SurfaceVariant
+            color = SurfaceVariant,
+            enabled = webSocketConnected  // 只有WebSocket连接时才允许切换
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -219,14 +222,14 @@ private fun AudioOutputSelector(
                 Text(
                     text = if (currentMode == "phone") "切换到车机" else "切换到手机",
                     style = MaterialTheme.typography.bodySmall,
-                    color = OnSurface,
+                    color = if (webSocketConnected) OnSurface else OnSurface.copy(alpha = 0.38f),
                     fontWeight = FontWeight.SemiBold
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = "→",
                     style = MaterialTheme.typography.bodySmall,
-                    color = OnSurfaceVariant
+                    color = if (webSocketConnected) OnSurfaceVariant else OnSurfaceVariant.copy(alpha = 0.38f)
                 )
             }
         }

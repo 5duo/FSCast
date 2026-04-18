@@ -38,6 +38,7 @@ fun LeftOperationPanel(
     selectedDisplayId: Int,
     availableDisplays: List<DisplayInfo>,
     isFloatingWindowEnabled: Boolean,
+    webSocketConnected: Boolean = false,  // WebSocket连接状态
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
     onPrevious: () -> Unit,
@@ -74,6 +75,7 @@ fun LeftOperationPanel(
             onNext = onNext,
             onMute = onMute,
             onAudioOutputChange = onAudioOutputChange,
+            webSocketConnected = webSocketConnected,
             modifier = Modifier.fillMaxWidth()
         )
 
@@ -113,6 +115,7 @@ private fun PlaybackControlSection(
     onNext: () -> Unit,
     onMute: () -> Unit,
     onAudioOutputChange: () -> Unit,
+    webSocketConnected: Boolean = false,  // WebSocket连接状态
     modifier: Modifier = Modifier
 ) {
     SectionCard(
@@ -194,7 +197,8 @@ private fun PlaybackControlSection(
                     .height(40.dp)
                     .weight(1f),
                 shape = RoundedCornerShape(8.dp),
-                color = GoldSurfaceVariant
+                color = GoldSurfaceVariant,
+                enabled = webSocketConnected  // 只有WebSocket连接时才可用
             ) {
                 Row(
                     modifier = Modifier

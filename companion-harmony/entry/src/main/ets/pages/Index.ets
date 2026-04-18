@@ -15,11 +15,12 @@ import { CarWebSocketClient } from '../service/CarWebSocketClient'
 import { VideoPlayer } from '../service/VideoPlayer'
 import { MediaSessionService } from '../service/MediaSessionService'
 import { BackgroundService } from '../service/BackgroundService'
-import { StatusPanel } from '../components/StatusPanel'
+import { ConnectionStatusCard } from '../components/ConnectionStatusCard'
 import { VideoPlayerCard } from '../components/VideoPlayerCard'
 import { VideoUrlCard } from '../components/VideoUrlCard'
-import { ControlPanel } from '../components/ControlPanel'
+// import { ControlPanel } from '../components/ControlPanel'  // 已移除，功能整合到StatusPanel
 import { CarIpDialog } from '../components/CarIpDialog'
+import { NetworkScanService } from '../service/NetworkScanService'
 
 const TAG = 'IndexPage'
 const DOMAIN = 0x0000
@@ -32,6 +33,7 @@ struct Index {
   private carWebSocketClient: CarWebSocketClient = new CarWebSocketClient()
   private mediaSessionService: MediaSessionService = new MediaSessionService()
   private backgroundService: BackgroundService = new BackgroundService()
+  private networkScanService: NetworkScanService = new NetworkScanService()
 
   // ===== 网络连接监听 =====
   private netCon = connection.createNetConnection()
@@ -69,28 +71,47 @@ struct Index {
   // ===== 新增状态变量 =====
   @State networkStatus: string = 'unknown'  // unknown, available, lost
   @State lastConnectionTime: number = 0  // 最后连接时间戳
-  @State isStatusPanelExpanded: boolean = false  // 状态面板展开状态
+  @State localIpAddress: string = ''  // 本机IP地址
   @State tempIp: string = ''  // IP设置对话框临时变量
+
+  // 自动扫描状态
+  @State isAutoScanning: boolean = false  // 是否正在自动扫描
+  @State autoScanProgress: string = ''  // 自动扫描进度
+  @State hasAttemptedAutoScan: boolean = false  // 是否已经尝试过自动扫描
+
+  // 刷新状态
+  @State isRefreshing: boolean = false  // 是否正在刷新连接
+  @State scanProgressDetail: string = ''  // 详细扫描进度（显示在卡片中）
 
   // 下载状态
   @State isDownloading: boolean = false
   @State downloadProgress: number = 0
 
+  // 双向同步状态：是否在手机播放模式（已收到URI并正在播放）
+  @State isPhoneMode: boolean = false
+
   aboutToAppear(): void {
-    hilog.info(DOMAIN, TAG, 'Page aboutToAppear')
+    hilog.info(DOMAIN, TAG, '========================================')
+    hilog.info(DOMAIN, TAG, 'Page aboutToAppear - 开始初始化')
+    hilog.info(DOMAIN, TAG, '========================================')
 
     // 设置媒体服务和后台服务的上下文
     this.mediaSessionService.setContext(getContext(this))
     this.backgroundService.setContext(getContext(this))
 
-    // 异步初始化服务
-    this.initializeServices()
-
-    // 初始化媒体会话
+    // 初始化媒体会话（同步，快速返回）
     this.initializeMediaSession()
 
-    // 启动定期状态检查
+    // 启动定期状态检查（先启动，确保状态更新机制运行）
     this.startPeriodicStatusCheck()
+
+    // ⚠️ 重要：异步初始化服务，不阻塞UI显示
+    // UI会先显示默认状态，然后逐步更新
+    setTimeout(() => {
+      this.initializeServices()
+    }, 100)  // 延迟100ms，确保UI已经渲染
+
+    hilog.info(DOMAIN, TAG, 'UI初始化完成，开始异步加载服务')
   }
 
   /**
@@ -168,16 +189,63 @@ struct Index {
    */
   private async initializeServices(): Promise<void> {
     try {
-      // 加载保存的车机IP地址
+      hilog.info(DOMAIN, TAG, '========================================')
+      hilog.info(DOMAIN, TAG, '开始初始化服务')
+      hilog.info(DOMAIN, TAG, '========================================')
+
+      // 1. 首先检查是否有WiFi连接
+      hilog.info(DOMAIN, TAG, '步骤1: 检查WiFi连接')
+      const hasWifi = await this.networkScanService.hasWifiConnection()
+      if (!hasWifi) {
+        hilog.warn(DOMAIN, TAG, '✗ 未检测到WiFi连接，跳过自动扫描')
+        this.localIpAddress = '未连接WiFi'
+        this.autoScanProgress = '请先连接WiFi后重试'
+        return
+      }
+
+      // 2. 获取本机IP地址
+      hilog.info(DOMAIN, TAG, '步骤2: 获取本机IP地址')
+      const phoneIp = await this.networkScanService.getLocalIpAddress()
+      hilog.info(DOMAIN, TAG, `getLocalIpAddress返回: "${phoneIp}", 长度: ${phoneIp.length}`)
+
+      if (phoneIp && phoneIp.length > 0 && phoneIp !== '获取中...') {
+        this.localIpAddress = phoneIp
+        hilog.info(DOMAIN, TAG, `✓ 本机IP已更新到UI状态: ${this.localIpAddress}`)
+      } else {
+        hilog.warn(DOMAIN, TAG, '✗ 无法获取有效本机IP，使用占位符')
+        this.localIpAddress = '获取中...'
+      }
+
+      // 3. 加载保存的车机IP地址
+      hilog.info(DOMAIN, TAG, '步骤3: 加载车机IP配置')
       await this.loadCarIpAddress()
 
-      // 设置网络状态监听
+      // 4. 设置网络状态监听
+      hilog.info(DOMAIN, TAG, '步骤4: 设置网络监听')
       this.setupNetworkListener()
 
-      // 连接到车机端WebSocket
-      this.connectToCar()
+      // 4.5. 提前设置WebSocket回调（避免时序问题）
+      hilog.info(DOMAIN, TAG, '步骤4.5: 提前设置WebSocket回调')
+      this.setupWebSocketCallbacks()
 
+      // 5. 先尝试使用保存的IP连接
+      hilog.info(DOMAIN, TAG, '步骤5: 尝试连接到保存的车机IP')
+      const connected = await this.tryConnectToCar(this.carIpAddress)
+
+      // 6. 如果连接失败，启动自动扫描
+      if (!connected) {
+        hilog.info(DOMAIN, TAG, '步骤6: 保存IP连接失败，启动自动扫描')
+        await this.autoScanAndConnect()
+      } else {
+        hilog.info(DOMAIN, TAG, '步骤6: 使用保存IP连接成功')
+      }
+
+      hilog.info(DOMAIN, TAG, '========================================')
       hilog.info(DOMAIN, TAG, '服务初始化完成')
+      hilog.info(DOMAIN, TAG, `本机IP: ${this.localIpAddress}`)
+      hilog.info(DOMAIN, TAG, `车机IP: ${this.carIpAddress}`)
+      hilog.info(DOMAIN, TAG, `WebSocket连接: ${this.webSocketConnected}`)
+      hilog.info(DOMAIN, TAG, '========================================')
 
     } catch (error) {
       hilog.error(DOMAIN, TAG, `启动服务失败: ${JSON.stringify(error)}`)
@@ -196,23 +264,25 @@ struct Index {
   }
 
   /**
-   * 检查所有服务状态
+   * 检查所有服务状态（定期调用，实时更新UI）
    */
   private checkAllServiceStatus(): void {
     // 检查WebSocket连接状态
     const wsConnected = this.carWebSocketClient.isClientConnected()
-    if (this.webSocketConnected !== wsConnected) {
-      this.webSocketConnected = wsConnected
-      this.carConnectionStatus = wsConnected ?
-        `已连接: ${this.carIpAddress}` : '未连接'
 
-      // 更新最后连接时间
-      if (wsConnected && !this.webSocketConnected) {
-        this.lastConnectionTime = Date.now()
-      }
+    hilog.debug(DOMAIN, TAG, `checkAllServiceStatus: wsConnected=${wsConnected}, webSocketConnected=${this.webSocketConnected}`)
 
-      hilog.info(DOMAIN, TAG, `WebSocket状态变化: ${this.carConnectionStatus}`)
+    // 强制同步状态：不管是否变化，都更新一次
+    this.webSocketConnected = wsConnected
+    this.carConnectionStatus = wsConnected ?
+      `已连接: ${this.carIpAddress}` : '未连接'
+
+    // 更新最后连接时间
+    if (wsConnected) {
+      this.lastConnectionTime = Date.now()
     }
+
+    hilog.info(DOMAIN, TAG, `✓ 状态已同步: webSocketConnected=${this.webSocketConnected}, carIpAddress=${this.carIpAddress}`)
   }
 
   /**
@@ -249,18 +319,16 @@ struct Index {
   }
 
   /**
-   * 连接到车机端
+   * 设置所有WebSocket命令回调
    */
-  private connectToCar(): void {
-    hilog.info(DOMAIN, TAG, `尝试连接到车机端: ${this.carIpAddress}`)
-    this.isConnecting = true
+  private setupWebSocketCallbacks(): void {
+    hilog.info(DOMAIN, TAG, '设置WebSocket命令回调')
 
-    // 设置WebSocket回调
+    // 播放命令回调
     this.carWebSocketClient.setOnPlayCommand((uri: string, httpHeaders: Record<string, string>) => {
       hilog.info(DOMAIN, TAG, `========================================`)
       hilog.info(DOMAIN, TAG, `收到WebSocket播放命令`)
       hilog.info(DOMAIN, TAG, `URI长度: ${uri.length}`)
-      hilog.info(DOMAIN, TAG, `URI: ${uri.substring(0, 100)}...`)
       hilog.info(DOMAIN, TAG, `HTTP头数量: ${Object.keys(httpHeaders).length}`)
       hilog.info(DOMAIN, TAG, `========================================`)
 
@@ -268,14 +336,16 @@ struct Index {
       this.dlnaUri = uri
       this.dlnaHttpHeaders = httpHeaders
 
-      hilog.info(DOMAIN, TAG, `已更新dlnaUri，Video组件会自动播放`)
+      // 进入手机播放模式（启用双向同步）
+      this.isPhoneMode = true
+
+      hilog.info(DOMAIN, TAG, `已更新dlnaUri，Video组件会自动播放，已进入手机播放模式`)
     })
 
-    // 新的同步启动流程：播放并跳转
+    // 同步启动命令回调（play_and_seek）
     this.carWebSocketClient.setOnPlayAndSeek((uri: string, httpHeaders: Record<string, string>, position: number) => {
       hilog.info(DOMAIN, TAG, `========================================`)
       hilog.info(DOMAIN, TAG, `收到同步启动命令`)
-      hilog.info(DOMAIN, TAG, `URI长度: ${uri.length}`)
       hilog.info(DOMAIN, TAG, `目标进度: ${position}ms (${Math.floor(position / 1000)}s)`)
       hilog.info(DOMAIN, TAG, `========================================`)
 
@@ -283,8 +353,10 @@ struct Index {
       this.dlnaUri = uri
       this.dlnaHttpHeaders = httpHeaders
 
+      // 进入手机播放模式（启用双向同步）
+      this.isPhoneMode = true
+
       // 等待视频加载后跳转并暂停
-      // Video组件会自动开始加载视频
       hilog.info(DOMAIN, TAG, `等待视频加载...`)
 
       // 延迟1秒后跳转并暂停（给视频一些加载时间）
@@ -301,58 +373,33 @@ struct Index {
       }, 1000)
     })
 
-    // 恢复播放命令（同步启动流程的最后一步）
+    // 恢复播放命令回调（resume）
     this.carWebSocketClient.setOnResumeCommand(() => {
       hilog.info(DOMAIN, TAG, `收到同时播放命令，开始播放`)
       this.mainVideoController.start()
       this.dlnaIsPlaying = true
     })
 
-    // 连接断开回调：立即暂停视频
-    this.carWebSocketClient.setOnDisconnected(() => {
-      hilog.warn(DOMAIN, TAG, `========================================`)
-      hilog.warn(DOMAIN, TAG, `与车机断开连接，立即暂停视频`)
-      hilog.warn(DOMAIN, TAG, `========================================`)
-
-      // 更新连接状态
-      this.webSocketConnected = false
-      this.carConnectionStatus = '未连接'
-      this.isConnecting = false
-
-      // 立即暂停视频
-      this.mainVideoController.pause()
-      this.dlnaIsPlaying = false
-      this.dlnaPosition = 0
-      this.dlnaDuration = 0
-
-      hilog.info(DOMAIN, TAG, '视频已暂停，等待重新连接')
-    })
-
-    // 连接成功回调
-    this.carWebSocketClient.setOnConnected(() => {
-      hilog.info(DOMAIN, TAG, 'WebSocket连接成功')
-      this.webSocketConnected = true
-      this.carConnectionStatus = `已连接: ${this.carIpAddress}`
-      this.lastConnectionTime = Date.now()
-      this.isConnecting = false
-    })
-
+    // 暂停命令回调
     this.carWebSocketClient.setOnPauseCommand(() => {
-      hilog.info(DOMAIN, TAG, '收到暂停命令')
+      hilog.info(DOMAIN, TAG, `收到暂停命令`)
       this.mainVideoController.pause()
     })
 
+    // 停止命令回调
     this.carWebSocketClient.setOnStopCommand(() => {
-      hilog.info(DOMAIN, TAG, '收到停止命令')
+      hilog.info(DOMAIN, TAG, `收到停止命令`)
       this.stopVideoAndClearState()
     })
 
+    // 跳转命令回调
     this.carWebSocketClient.setOnSeekCommand((position: number) => {
       hilog.info(DOMAIN, TAG, `收到跳转命令: ${position}`)
       this.mainVideoController.setCurrentTime(position)
       this.dlnaPosition = position
     })
 
+    // 进度更新回调
     this.carWebSocketClient.setOnProgressUpdate((position: number, duration: number, isPlaying: boolean) => {
       hilog.info(DOMAIN, TAG, `收到进度更新: ${position}/${duration}, playing=${isPlaying}, prepared=${this.mainVideoPrepared}`)
 
@@ -386,6 +433,208 @@ struct Index {
       }
     })
 
+    // 连接断开回调：立即暂停视频并清理状态
+    this.carWebSocketClient.setOnDisconnected(() => {
+      hilog.warn(DOMAIN, TAG, `========================================`)
+      hilog.warn(DOMAIN, TAG, `与车机断开连接，立即暂停视频并清理状态`)
+      hilog.warn(DOMAIN, TAG, `========================================`)
+
+      // 更新连接状态
+      this.webSocketConnected = false
+      this.carConnectionStatus = '未连接'
+      this.isConnecting = false
+
+      // 立即暂停视频
+      this.mainVideoController.pause()
+      this.dlnaIsPlaying = false
+      this.dlnaPosition = 0
+      this.dlnaDuration = 0
+
+      // 清理URI和状态，隐藏视频卡片
+      this.dlnaUri = ''
+      this.dlnaHttpHeaders = {}
+      this.isPhoneMode = false
+
+      hilog.info(DOMAIN, TAG, '视频已暂停，状态已清理，等待重新连接')
+    })
+
+    hilog.info(DOMAIN, TAG, 'WebSocket命令回调设置完成')
+  }
+
+  /**
+   * 尝试连接到车机端（返回是否成功）
+   */
+  private async tryConnectToCar(ip: string): Promise<boolean> {
+    hilog.info(DOMAIN, TAG, `========================================`)
+    hilog.info(DOMAIN, TAG, `尝试连接到车机端: ${ip}`)
+    hilog.info(DOMAIN, TAG, `========================================`)
+
+    this.isConnecting = true
+
+    return new Promise<boolean>((resolve) => {
+      let connectionTimeoutId: number = -1
+
+      // ⚠️ 重要：在连接之前设置所有回调
+      hilog.info(DOMAIN, TAG, '步骤1: 设置WebSocket回调')
+
+      // 连接成功回调
+      this.carWebSocketClient.setOnConnected(() => {
+        hilog.info(DOMAIN, TAG, '========================================')
+        hilog.info(DOMAIN, TAG, '✓ WebSocket连接成功')
+        hilog.info(DOMAIN, TAG, `车机IP: ${ip}`)
+        hilog.info(DOMAIN, TAG, '========================================')
+
+        // 清除超时定时器
+        if (connectionTimeoutId !== -1) {
+          clearTimeout(connectionTimeoutId)
+          connectionTimeoutId = -1
+        }
+
+        // 更新连接状态（@State会触发UI刷新）
+        this.webSocketConnected = true
+        this.carConnectionStatus = `已连接: ${ip}`
+        this.carIpAddress = ip
+        this.lastConnectionTime = Date.now()
+        this.isConnecting = false
+
+        hilog.info(DOMAIN, TAG, `状态已更新: webSocketConnected=${this.webSocketConnected}, carIpAddress=${this.carIpAddress}`)
+
+        resolve(true)
+      })
+
+      // 注意：WebSocket回调已在应用启动时预先设置（setupWebSocketCallbacks）
+
+      // ⚠️ 重要：所有回调设置完成后，才开始连接
+      // 注意：connect方法立即返回，连接是异步的
+      hilog.info(DOMAIN, TAG, '步骤2: 开始连接到车机端')
+      this.carWebSocketClient.connect(ip)
+
+      // 3秒超时检查
+      connectionTimeoutId = setTimeout(() => {
+        if (!this.webSocketConnected) {
+          hilog.warn(DOMAIN, TAG, `========================================`)
+          hilog.warn(DOMAIN, TAG, `✗ 连接超时: ${ip}`)
+          hilog.warn(DOMAIN, TAG, `========================================`)
+          this.isConnecting = false
+          resolve(false)
+        }
+      }, 3000)
+    })
+  }
+
+  /**
+   * 自动扫描并连接车机端
+   */
+  private async autoScanAndConnect(): Promise<void> {
+    if (this.hasAttemptedAutoScan) {
+      hilog.info(DOMAIN, TAG, '已经尝试过自动扫描，跳过')
+      return
+    }
+
+    // 首先检查WiFi连接
+    const hasWifi = await this.networkScanService.hasWifiConnection()
+    if (!hasWifi) {
+      hilog.warn(DOMAIN, TAG, '未检测到WiFi连接，跳过自动扫描')
+      this.autoScanProgress = '请先连接WiFi后重试'
+      this.scanProgressDetail = '请先连接WiFi后重试'
+      return
+    }
+
+    this.hasAttemptedAutoScan = true
+    this.isAutoScanning = true
+    this.autoScanProgress = '正在获取本机IP...'
+    this.scanProgressDetail = '获取本机IP...'
+
+    hilog.info(DOMAIN, TAG, '开始自动扫描车机端')
+
+    try {
+      // 获取本机IP
+      const phoneIp = await this.networkScanService.getLocalIpAddress()
+      if (!phoneIp || phoneIp.length === 0) {
+        hilog.error(DOMAIN, TAG, '无法获取本机IP，跳过自动扫描')
+        this.autoScanProgress = '无法获取本机IP'
+        this.scanProgressDetail = '无法获取本机IP'
+        this.isAutoScanning = false
+        return
+      }
+
+      hilog.info(DOMAIN, TAG, `本机IP: ${phoneIp}`)
+      this.autoScanProgress = '正在扫描网段...'
+      this.scanProgressDetail = '扫描网段中...'
+
+      // 开始扫描
+      this.networkScanService.scanNetwork(phoneIp, {
+        onProgress: (current: number, total: number, currentIp: string) => {
+          const progress = `扫描中: ${current}/${total}`
+          this.autoScanProgress = progress
+          this.scanProgressDetail = progress
+          hilog.debug(DOMAIN, TAG, `扫描进度: ${current}/${total}`)
+        },
+        onFound: (result) => {
+          hilog.info(DOMAIN, TAG, `发现车机端: ${result.ip}`)
+          this.scanProgressDetail = `发现车机: ${result.ip}`
+        },
+        onComplete: async (results) => {
+          this.isAutoScanning = false
+
+          if (results.length > 0) {
+            hilog.info(DOMAIN, TAG, `扫描完成，找到 ${results.length} 个车机端`)
+
+            // 尝试连接第一个找到的车机端
+            const firstCar = results[0]
+            this.autoScanProgress = `正在连接 ${firstCar.ip}...`
+            this.scanProgressDetail = `连接中: ${firstCar.ip}`
+
+            const connected = await this.tryConnectToCar(firstCar.ip)
+
+            if (connected) {
+              hilog.info(DOMAIN, TAG, `自动连接成功: ${firstCar.ip}`)
+              this.autoScanProgress = `已自动连接: ${firstCar.ip}`
+              this.scanProgressDetail = ''
+
+              // 保存IP地址
+              await this.saveCarIpAddress(firstCar.ip)
+
+              // 3秒后清除进度信息
+              setTimeout(() => {
+                this.autoScanProgress = ''
+              }, 3000)
+            } else {
+              hilog.warn(DOMAIN, TAG, `自动连接失败: ${firstCar.ip}`)
+              this.autoScanProgress = '连接失败，请手动设置'
+              this.scanProgressDetail = '连接失败'
+            }
+          } else {
+            hilog.warn(DOMAIN, TAG, '扫描完成，未找到车机端')
+            this.autoScanProgress = '未找到车机端，请手动设置'
+            this.scanProgressDetail = '未找到车机'
+          }
+        },
+        onError: (error) => {
+          this.isAutoScanning = false
+          hilog.error(DOMAIN, TAG, `扫描失败: ${error}`)
+          this.autoScanProgress = `扫描失败: ${error}`
+          this.scanProgressDetail = `扫描失败: ${error}`
+        }
+      })
+    } catch (error) {
+      this.isAutoScanning = false
+      hilog.error(DOMAIN, TAG, `自动扫描异常: ${JSON.stringify(error)}`)
+      this.autoScanProgress = '扫描异常'
+      this.scanProgressDetail = '扫描异常'
+    }
+  }
+
+  /**
+   * 连接到车机端
+   */
+  private connectToCar(): void {
+    hilog.info(DOMAIN, TAG, `尝试连接到车机端: ${this.carIpAddress}`)
+    this.isConnecting = true
+
+    // 设置WebSocket回调
+    this.setupWebSocketCallbacks()
+
     // 连接到车机端
     this.carWebSocketClient.connect(this.carIpAddress)
 
@@ -401,6 +650,10 @@ struct Index {
   private reconnectToCar(): void {
     hilog.info(DOMAIN, TAG, '用户手动触发重新连接')
 
+    // 设置刷新状态
+    this.isRefreshing = true
+    this.scanProgressDetail = '正在连接...'
+
     // 先断开现有连接
     if (this.carWebSocketClient.isClientConnected()) {
       hilog.info(DOMAIN, TAG, '断开现有连接')
@@ -411,6 +664,12 @@ struct Index {
     setTimeout(() => {
       hilog.info(DOMAIN, TAG, `重新连接到车机端: ${this.carIpAddress}`)
       this.connectToCar()
+
+      // 3秒后重置刷新状态（无论成功或失败）
+      setTimeout(() => {
+        this.isRefreshing = false
+        this.scanProgressDetail = ''
+      }, 3000)
     }, 500)
   }
 
@@ -432,7 +691,7 @@ struct Index {
     // 创建新的对话框实例
     this.ipDialogController = new CustomDialogController({
       builder: CarIpDialog({
-        ipAddress: $tempIp,
+        ipAddress: this.tempIp,
         onSave: (ip: string) => {
           this.saveCarIpAddressAndConnect(ip)
         }
@@ -479,10 +738,10 @@ struct Index {
   }
 
   /**
-   * 播放视频
+   * 播放视频（支持双向同步）
    */
   private async playVideo(): Promise<void> {
-    hilog.info(DOMAIN, TAG, `playVideo被调用，dlnaUri长度: ${this.dlnaUri.length}`)
+    hilog.info(DOMAIN, TAG, `playVideo被调用，dlnaUri长度: ${this.dlnaUri.length}, isPhoneMode=${this.isPhoneMode}`)
 
     if (this.dlnaUri.length === 0) {
       hilog.warn(DOMAIN, TAG, '无播放URI，无法播放')
@@ -506,6 +765,13 @@ struct Index {
       await this.videoPlayer.play(this.dlnaUri, this.dlnaHttpHeaders)
 
       this.dlnaIsPlaying = true
+
+      // 双向同步：如果在手机播放模式，发送播放命令到车机端
+      if (this.isPhoneMode && this.webSocketConnected) {
+        hilog.info(DOMAIN, TAG, '手机模式：发送播放命令到车机端')
+        this.carWebSocketClient.sendControlCommand('play')
+      }
+
       hilog.info(DOMAIN, TAG, '视频播放成功')
     } catch (error) {
       hilog.error(DOMAIN, TAG, `播放失败: ${JSON.stringify(error)}`)
@@ -559,12 +825,18 @@ struct Index {
   }
 
   /**
-   * 暂停视频
+   * 暂停视频（支持双向同步）
    */
   private async pauseVideo(): Promise<void> {
     try {
       await this.videoPlayer.pause()
       this.dlnaIsPlaying = false
+
+      // 双向同步：如果在手机播放模式，发送暂停命令到车机端
+      if (this.isPhoneMode && this.webSocketConnected) {
+        hilog.info(DOMAIN, TAG, '手机模式：发送暂停命令到车机端')
+        this.carWebSocketClient.sendControlCommand('pause')
+      }
     } catch (error) {
       hilog.error(DOMAIN, TAG, `暂停失败: ${JSON.stringify(error)}`)
     }
@@ -584,7 +856,7 @@ struct Index {
   }
 
   /**
-   * 停止视频并清空状态（用于stop命令和播放完成）
+   * 停止视频并清空状态（用于stop命令和播放完成，支持双向同步）
    */
   private async stopVideoAndClearState(): Promise<void> {
     hilog.info(DOMAIN, TAG, '========================================')
@@ -592,6 +864,12 @@ struct Index {
     hilog.info(DOMAIN, TAG, '========================================')
 
     try {
+      // 双向同步：如果在手机播放模式，发送停止命令到车机端
+      if (this.isPhoneMode && this.webSocketConnected) {
+        hilog.info(DOMAIN, TAG, '手机模式：发送停止命令到车机端')
+        this.carWebSocketClient.sendControlCommand('stop')
+      }
+
       // 停止视频播放
       await this.videoPlayer.stop()
 
@@ -606,6 +884,9 @@ struct Index {
       this.mainVideoPrepared = false
       this.phoneActualPosition = 0
 
+      // 退出手机播放模式
+      this.isPhoneMode = false
+
       // 停止后台服务和媒体会话
       await this.backgroundService.stop()
       await this.mediaSessionService.setPlaybackState(false, 0, 0)
@@ -617,12 +898,18 @@ struct Index {
   }
 
   /**
-   * 跳转
+   * 跳转（支持双向同步）
    */
   private async seekVideo(position: number): Promise<void> {
     try {
       await this.videoPlayer.seek(position)
       this.dlnaPosition = position
+
+      // 双向同步：如果在手机播放模式，发送跳转命令到车机端
+      if (this.isPhoneMode && this.webSocketConnected) {
+        hilog.info(DOMAIN, TAG, `手机模式：发送跳转命令到车机端，位置: ${position}ms`)
+        this.carWebSocketClient.sendControlCommand('seek', { 'position': position })
+      }
     } catch (error) {
       hilog.error(DOMAIN, TAG, `跳转失败: ${JSON.stringify(error)}`)
     }
@@ -773,38 +1060,51 @@ struct Index {
   build() {
     Scroll() {
       Column({ space: 12 }) {
-        // 状态面板（可展开）
-        StatusPanel({
+        // 连接状态卡片（独立显示）
+        ConnectionStatusCard({
           webSocketConnected: this.webSocketConnected,
-          carConnectionStatus: this.carConnectionStatus,
-          networkStatus: this.networkStatus,
-          dlnaUri: this.dlnaUri,
-          dlnaIsPlaying: this.dlnaIsPlaying,
-          dlnaPosition: this.dlnaPosition,
-          dlnaDuration: this.dlnaDuration,
-          lastConnectionTime: this.lastConnectionTime,
-          isExpanded: $isStatusPanelExpanded,
-          onRefresh: () => {
-            this.reconnectToCar()
+          carIpAddress: this.carIpAddress,
+          localIpAddress: this.localIpAddress,
+          isRefreshing: this.isRefreshing,
+          scanProgress: this.scanProgressDetail,
+          onRefresh: async () => {
+            // 首先检查WiFi连接
+            const hasWifi = await this.networkScanService.hasWifiConnection()
+            if (!hasWifi) {
+              this.autoScanProgress = '请先连接WiFi后重试'
+              this.scanProgressDetail = '请先连接WiFi后重试'
+              setTimeout(() => {
+                this.autoScanProgress = ''
+                this.scanProgressDetail = ''
+              }, 3000)
+              return
+            }
+
+            // 重置扫描标记，允许重新扫描
+            this.hasAttemptedAutoScan = false
+            // 启动自动扫描并重新连接
+            await this.autoScanAndConnect()
           }
         })
 
-        // 视频URL卡片（显示当前接收的URL）
-        VideoUrlCard({
-          dlnaUri: this.dlnaUri,
-          dlnaHttpHeaders: this.dlnaHttpHeaders,
-          isDownloading: $isDownloading,
-          downloadProgress: $downloadProgress,
-          onCopy: () => {
-            this.showCopySuccessToast()
-          },
-          onDownload: (uri: string, headers: Record<string, string>) => {
-            this.downloadVideo(uri, headers)
-          }
-        })
+        // 视频URL卡片（收到URI且WebSocket连接时显示）
+        if (this.dlnaUri.length > 0 && this.webSocketConnected) {
+          VideoUrlCard({
+            dlnaUri: this.dlnaUri,
+            dlnaHttpHeaders: this.dlnaHttpHeaders,
+            isDownloading: $isDownloading,
+            downloadProgress: $downloadProgress,
+            onCopy: () => {
+              this.showCopySuccessToast()
+            },
+            onDownload: (uri: string, headers: Record<string, string>) => {
+              this.downloadVideo(uri, headers)
+            }
+          })
+        }
 
-        // 视频播放器（有URI时显示）
-        if (this.dlnaUri.length > 0) {
+        // 视频播放器（有URI且WebSocket连接时显示）
+        if (this.dlnaUri.length > 0 && this.webSocketConnected) {
           VideoPlayerCard({
             dlnaUri: this.dlnaUri,
             dlnaHttpHeaders: this.dlnaHttpHeaders,
@@ -827,19 +1127,6 @@ struct Index {
             }
           })
         }
-
-        // 底部控制面板
-        ControlPanel({
-          webSocketConnected: this.webSocketConnected,
-          carIpAddress: this.carIpAddress,
-          isConnecting: this.isConnecting,
-          onReconnect: () => {
-            this.reconnectToCar()
-          },
-          onConfigureIp: () => {
-            this.showIpDialog()
-          }
-        })
 
         Blank().height(16)
       }

@@ -45,10 +45,26 @@ export class AppSizes {
 
 @Component
 export struct StatusPanel {
-  // 连接状态
+  // 连接状态（从父组件传入的props）
+  @Prop @Watch('onLocalIpAddressChange') localIpAddress: string = ''  // 本机IP地址
   @Prop webSocketConnected: boolean = false
+  @Prop carIpAddress: string = ''  // 车机IP地址
   @Prop carConnectionStatus: string = '未连接'
   @Prop networkStatus: string = 'unknown'
+
+  // 本地状态镜像变量，用于触发UI更新
+  @State private displayLocalIp: string = ''
+
+  aboutToAppear(): void {
+    hilog.info(DOMAIN, TAG, `StatusPanel初始化: localIpAddress=${this.localIpAddress}`)
+    this.displayLocalIp = this.localIpAddress
+  }
+
+  // 监听localIpAddress变化
+  onLocalIpAddressChange(): void {
+    hilog.info(DOMAIN, TAG, `✓ localIpAddress变化: ${this.localIpAddress}`)
+    this.displayLocalIp = this.localIpAddress
+  }
 
   // DLNA状态
   @Prop dlnaUri: string = ''
@@ -59,125 +75,54 @@ export struct StatusPanel {
   // 最后连接时间
   @Prop lastConnectionTime: number = 0
 
-  // 面板展开状态
-  @Link isExpanded: boolean
+  // 自动扫描状态
+  @Prop isAutoScanning: boolean = false
+  @Prop autoScanProgress: string = ''
 
   // 回调函数
-  onRefresh?: () => void
+  onConfigureIp?: () => void  // 长按打开IP设置
 
   build() {
     Column() {
-      // 顶部状态条
-      this.StatusBar()
+      // 网络信息组
+      Column() {
+        // 分组标题
+        Text('网络信息')
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(AppColors.TEXT_SECONDARY)
+          .width('100%')
+          .margin({ bottom: AppSizes.SPACING_SM })
 
-      // 展开的详细状态
-      if (this.isExpanded) {
-        this.DetailStatusPanel()
-      }
-    }
-    .width('100%')
-    .backgroundColor(AppColors.BG_CARD)
-    .borderRadius(AppSizes.RADIUS_LG)
-    .animation({
-      duration: 300,
-      curve: Curve.EaseInOut
-    })
-  }
-
-  /**
-   * 顶部状态条（优化版）
-   */
-  @Builder StatusBar() {
-    Row() {
-      // 左侧：应用名和连接状态
-      Row({ space: AppSizes.SPACING_MD }) {
-        // 应用标题 - 加粗更醒目
-        Text('FSCast')
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor(AppColors.TEXT_PRIMARY)
-
-        // 连接状态指示器
-        Row({ space: 6 }) {
-          Circle()
-            .width(8)
-            .height(8)
-            .fill(this.webSocketConnected ? AppColors.SUCCESS : AppColors.NEUTRAL)
-
-          Text(this.carConnectionStatus)
-            .fontSize(13)
-            .fontColor(this.webSocketConnected ? AppColors.SUCCESS : AppColors.NEUTRAL)
-            .fontWeight(FontWeight.Medium)
+        // 自动扫描进度
+        if (this.isAutoScanning || this.autoScanProgress.length > 0) {
+          this.StatusItemWithIcon(
+            SysIcons.SEARCH,
+            '自动扫描',
+            this.autoScanProgress,
+            this.isAutoScanning ? AppColors.PRIMARY : AppColors.TEXT_SECONDARY
+          )
         }
-        .padding({
-          left: AppSizes.SPACING_SM,
-          right: AppSizes.SPACING_SM,
-          top: 4,
-          bottom: 4
-        })
-        .backgroundColor(AppColors.BG_ELEMENT)
-        .borderRadius(AppSizes.RADIUS_MD)
-      }
 
-      Blank()
+        // 网络状态（本机IP）
+        this.StatusItem(
+          '',
+          '本机IP',
+          this.displayLocalIp && this.displayLocalIp.length > 0 ? this.displayLocalIp : '未获取到IP',
+          this.displayLocalIp && this.displayLocalIp.length > 0 ? AppColors.TEXT_SECONDARY : AppColors.TEXT_DISABLED
+        )
 
-      // 右侧：刷新按钮和展开图标
-      Row({ space: AppSizes.SPACING_SM }) {
-        // 刷新按钮 - 使用兼容性图标
-        Button() {
-          TextIcon({
-            iconKey: 'REFRESH',
-            fontSize: AppSizes.ICON_MD,
-            fontColor: AppColors.TEXT_SECONDARY
-          })
+        // 最后连接时间
+        if (this.lastConnectionTime > 0) {
+          this.StatusItemWithIcon(
+            SysIcons.CLOCK,
+            '最后连接',
+            this.formatTimestamp(this.lastConnectionTime),
+            AppColors.TEXT_SECONDARY
+          )
         }
-        .width(36)
-        .height(36)
-        .backgroundColor(AppColors.BG_ELEMENT)
-        .borderRadius(AppSizes.RADIUS_SM)
-        .type(ButtonType.Normal)
-        .onClick(() => {
-          hilog.info(DOMAIN, TAG, '用户点击刷新按钮')
-          this.onRefresh?.()
-        })
-        .stateEffect(true)
-
-        // 展开/收起按钮 - 使用兼容性图标
-        Button() {
-          TextIcon({
-            iconKey: this.isExpanded ? 'COLLAPSE' : 'EXPAND',
-            fontSize: 18,
-            fontColor: AppColors.TEXT_SECONDARY
-          })
-        }
-        .width(36)
-        .height(36)
-        .backgroundColor(AppColors.BG_ELEMENT)
-        .borderRadius(AppSizes.RADIUS_SM)
-        .type(ButtonType.Normal)
-        .onClick(() => {
-          this.isExpanded = !this.isExpanded
-          hilog.info(DOMAIN, TAG, `状态面板${this.isExpanded ? '展开' : '收起'}`)
-        })
-        .stateEffect(true)
       }
-    }
-    .width('100%')
-    .height(56)
-    .padding({
-      left: AppSizes.SPACING_LG,
-      right: AppSizes.SPACING_LG
-    })
-    .alignItems(VerticalAlign.Center)
-  }
-
-  /**
-   * 详细状态面板（优化版）
-   */
-  @Builder DetailStatusPanel() {
-    Column() {
-      // 连接状态组
-      this.ConnectionStatusGroup()
+      .width('100%')
 
       Divider()
         .color(AppColors.BG_ELEMENT)
@@ -197,6 +142,15 @@ export struct StatusPanel {
       top: AppSizes.SPACING_SM,
       bottom: AppSizes.SPACING_XL
     })
+    .backgroundColor(AppColors.BG_CARD)
+    .borderRadius(AppSizes.RADIUS_LG)
+    .gesture(
+      LongPressGesture({ repeat: false })
+        .onAction(() => {
+          hilog.info(DOMAIN, TAG, '状态面板长按，打开IP设置')
+          this.onConfigureIp?.()
+        })
+    )
   }
 
   /**
@@ -212,20 +166,30 @@ export struct StatusPanel {
         .width('100%')
         .margin({ bottom: AppSizes.SPACING_SM })
 
+      // 自动扫描进度
+      if (this.isAutoScanning || this.autoScanProgress.length > 0) {
+        this.StatusItemWithIcon(
+          SysIcons.SEARCH,
+          '自动扫描',
+          this.autoScanProgress,
+          this.isAutoScanning ? AppColors.PRIMARY : AppColors.TEXT_SECONDARY
+        )
+      }
+
       // WebSocket 状态
       this.StatusItem(
-        '', // 不使用图标，直接用状态颜色
+        '',
         'WebSocket',
-        this.getConnectionText(),
-        this.getConnectionColor()
+        this.webSocketConnected ? '已连接' : '未连接',
+        this.webSocketConnected ? AppColors.SUCCESS : AppColors.NEUTRAL
       )
 
-      // 网络状态
+      // 网络状态（本机IP）
       this.StatusItem(
-        '', // 不使用图标，直接用状态颜色
-        '网络',
-        this.getNetworkStatusText(),
-        this.getNetworkStatusColor()
+        '',
+        '本机IP',
+        this.localIpAddress && this.localIpAddress.length > 0 ? this.localIpAddress : '未获取到IP',
+        this.localIpAddress && this.localIpAddress.length > 0 ? AppColors.TEXT_SECONDARY : AppColors.TEXT_DISABLED
       )
 
       // 最后连接时间
@@ -398,12 +362,12 @@ export struct StatusPanel {
    * 获取网络状态文本
    */
   private getNetworkStatusText(): string {
-    if (this.networkStatus === 'available') {
-      return '可用'
-    } else if (this.networkStatus === 'lost') {
-      return '不可用'
+    // 显示本机IP
+    hilog.debug(DOMAIN, TAG, `getNetworkStatusText调用: displayLocalIp="${this.displayLocalIp}", 长度=${this.displayLocalIp.length}`)
+    if (this.displayLocalIp && this.displayLocalIp.length > 0) {
+      return this.displayLocalIp
     }
-    return '未知'
+    return '未获取到IP'
   }
 
   /**

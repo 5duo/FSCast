@@ -38,6 +38,9 @@ class CarWebSocketServer(private val port: Int) : WebSocketServer(InetSocketAddr
     var onClientConnected: ((String) -> Unit)? = null
     var onClientDisconnected: ((String) -> Unit)? = null
 
+    // 控制命令回调（来自手机端）
+    var onControlCommand: ((action: String, data: org.json.JSONObject, syncId: String, clientId: String) -> Unit)? = null
+
     /**
      * 连接状态
      */
@@ -86,7 +89,25 @@ class CarWebSocketServer(private val port: Int) : WebSocketServer(InetSocketAddr
         val clientId = conn.remoteSocketAddress.address.hostAddress ?: "unknown"
         Log.d(TAG, "收到消息 from $clientId: $message")
 
-        onMessageReceived?.invoke(message, conn)
+        try {
+            val json = org.json.JSONObject(message)
+            val type = json.optString("type")
+
+            when (type) {
+                "control_command" -> {
+                    // 处理来自手机端的控制命令
+                    handleControlCommand(json, conn, clientId)
+                }
+                else -> {
+                    // 其他消息类型使用现有回调处理
+                    onMessageReceived?.invoke(message, conn)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "解析消息失败: ${e.message}, 消息内容: $message")
+            // 解析失败时，使用现有回调处理
+            onMessageReceived?.invoke(message, conn)
+        }
     }
 
     override fun onError(conn: WebSocket?, ex: Exception?) {
@@ -245,9 +266,15 @@ class CarWebSocketServer(private val port: Int) : WebSocketServer(InetSocketAddr
      * 启动WebSocket服务器
      */
     override fun start() {
-        super.start()
-        isRunning = true
-        Log.i(TAG, "WebSocket服务器已启动，监听端口$port")
+        try {
+            super.start()
+            isRunning = true
+            Log.i(TAG, "WebSocket服务器已启动，监听端口$port")
+        } catch (e: Exception) {
+            isRunning = false
+            Log.e(TAG, "WebSocket服务器启动失败: ${e.message}", e)
+            throw e
+        }
     }
 
     /**
@@ -255,7 +282,46 @@ class CarWebSocketServer(private val port: Int) : WebSocketServer(InetSocketAddr
      */
     override fun stop() {
         isRunning = false
+
+        // 先关闭所有客户端连接
+        clients.values.forEach { client ->
+            try {
+                if (client.isOpen) {
+                    client.close()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "关闭客户端连接失败: ${e.message}")
+            }
+        }
+        clients.clear()
+
         super.stop()
         Log.i(TAG, "WebSocket服务器已停止")
+    }
+
+    /**
+     * 处理来自手机端的控制命令
+     */
+    private fun handleControlCommand(json: org.json.JSONObject, conn: WebSocket?, clientId: String) {
+        try {
+            val action = json.optString("action")
+            val data = json.optJSONObject("data") ?: org.json.JSONObject()
+            val syncId = json.optString("syncId")
+            val source = json.optString("source", "unknown")
+
+            Log.i(TAG, "收到手机端控制命令: action=$action, syncId=$syncId, source=$source")
+
+            // 验证来源
+            if (source != "phone") {
+                Log.w(TAG, "忽略非手机端的控制命令")
+                return
+            }
+
+            // 调用回调处理控制命令
+            onControlCommand?.invoke(action, data, syncId, clientId)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "处理控制命令失败: ${e.message}")
+        }
     }
 }

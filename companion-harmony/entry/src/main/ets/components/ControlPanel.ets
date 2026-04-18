@@ -21,7 +21,6 @@ export struct ControlPanel {
 
   // 回调函数
   onReconnect?: () => void
-  onConfigureIp?: () => void
 
   build() {
     Column() {
@@ -89,47 +88,14 @@ export struct ControlPanel {
       .borderRadius(AppSizes.RADIUS_MD)
       .margin({ bottom: AppSizes.SPACING_MD })
 
-      // 底部操作行
+      // 应用版本信息
       Row() {
-        // IP设置按钮
-        Button() {
-          Row({ space: AppSizes.SPACING_SM }) {
-            // 设置图标 - 使用兼容性图标
-            TextIcon({
-              iconKey: 'SETTINGS',
-              fontSize: AppSizes.ICON_MD,
-              fontColor: AppColors.TEXT_SECONDARY
-            })
-
-            // 按钮文字
-            Text('设置车机IP')
-              .fontSize(13)
-              .fontColor(AppColors.TEXT_SECONDARY)
-          }
-        }
-        .type(ButtonType.Normal)
-        .backgroundColor(AppColors.BG_ELEMENT)
-        .borderRadius(AppSizes.RADIUS_MD)
-        .padding({
-          left: AppSizes.SPACING_MD,
-          right: AppSizes.SPACING_MD,
-          top: AppSizes.SPACING_SM,
-          bottom: AppSizes.SPACING_SM
-        })
-        .onClick(() => {
-          hilog.info(DOMAIN, TAG, '用户点击设置车机IP按钮')
-          this.onConfigureIp?.()
-        })
-        .stateEffect(true)
-
-        Blank()
-
-        // 应用版本信息
         Text('FSCast Remote v1.0.0')
           .fontSize(11)
           .fontColor(AppColors.TEXT_DISABLED)
       }
       .width('100%')
+      .justifyContent(FlexAlign.Center)
     }
     .width('100%')
     .padding(AppSizes.SPACING_LG)
