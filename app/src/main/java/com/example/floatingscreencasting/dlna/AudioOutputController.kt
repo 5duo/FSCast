@@ -354,12 +354,13 @@ class AudioOutputController(
      * 开始进度同步
      * 每10秒检查一次进度，发送给手机端
      * 手机端收到后会检查差异，如果超过2秒则重新对齐
+     * 注意：只要手机端连接就发送进度，无论当前音频输出模式
      */
     private fun startProgressSync() {
         syncJob?.cancel()
         syncJob = scope.launch {
-            while (currentMode == OutputMode.PHONE) {
-                delay(PROGRESS_CHECK_INTERVAL_MS) // 每10秒检查一次
+            while (webSocketServer != null && webSocketServer.hasConnectedClients()) {
+                delay(PROGRESS_CHECK_INTERVAL_MS) // 每5秒检查一次
 
                 // 获取车机端当前播放进度
                 val currentPosition = playbackStateListener?.getCurrentPosition() ?: 0L
@@ -370,11 +371,12 @@ class AudioOutputController(
                     Log.d(TAG, "进度检查: 发送车机进度 ${currentPosition}ms 到手机端")
                     webSocketServer.sendProgressUpdate(
                         currentPosition,
-                        0,  // duration不需要
+                        0,  // duration不需要（手机端从视频流获取）
                         true  // isPlaying不需要精确判断
                     )
                 } else {
-                    Log.w(TAG, "进度同步: WebSocket未连接或无客户端")
+                    Log.d(TAG, "进度同步: 无手机端连接，停止同步")
+                    break
                 }
             }
         }
@@ -387,6 +389,18 @@ class AudioOutputController(
     private fun stopProgressSync() {
         syncJob?.cancel()
         syncJob = null
+    }
+
+    /**
+     * 发送初始进度信息给手机端
+     * 在投屏开始时调用
+     */
+    private fun sendInitialProgress() {
+        if (webSocketServer != null && webSocketServer.hasConnectedClients()) {
+            val currentPosition = playbackStateListener?.getCurrentPosition() ?: 0L
+            Log.i(TAG, "发送初始进度: ${currentPosition}ms")
+            webSocketServer.sendProgressUpdate(currentPosition, 0, true)
+        }
     }
 
     /**

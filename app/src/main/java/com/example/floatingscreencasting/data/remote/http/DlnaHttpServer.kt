@@ -72,8 +72,11 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
     private var onGetDuration: (() -> Long)? = null
     private var onGetPosition: (() -> Long)? = null
 
-    // 保存最后一次的HTTP头
+    // 保存最后一次的HTTP头和URI
     private var lastHttpHeaders: Map<String, String> = emptyMap()
+    private var currentUri: String = ""  // 保存当前播放的URI
+    private var currentMetadata: String = ""  // 保存当前播放的DIDL-Lite metadata
+    private var metadataDurationSeconds: Long = 0L  // 保存metadata中的时长（秒）作为后备值
 
     /**
      * 设置播放命令回调
@@ -186,6 +189,13 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
             // 解析SOAP命令并获取响应
             val soapResponse = parseSoapCommand(soapAction, bodyStr)
 
+            // **详细日志：记录完整响应**
+            Log.d(TAG, "========== 返回SOAP响应 ==========")
+            Log.d(TAG, "SOAPAction: $soapAction")
+            Log.d(TAG, "响应长度: ${soapResponse.length} 字符")
+            Log.d(TAG, "完整响应:\n$soapResponse")
+            Log.d(TAG, "====================================")
+
             return newFixedLengthResponse(
                 Response.Status.OK,
                 "text/xml; charset=\"utf-8\"",
@@ -239,6 +249,10 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                 // 保存合并后的HTTP头
                 lastHttpHeaders = mergedHeaders
 
+                // 保存原始metadata（用于GetPositionInfo响应）
+                currentMetadata = metadata
+                Log.d(TAG, "保存当前metadata: ${metadata.take(200)}...")
+
                 // 检测URL类型
                 val urlType = when {
                     uri.contains("bilibili.com/video") || uri.contains("b23.tv") -> {
@@ -270,6 +284,12 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                 )
 
                 Log.d(TAG, "解析结果 - 标题: $title, 时长: ${durationMs}ms (${formatTime(durationMs / 1000)})")
+
+                // 保存当前URI和metadata中的时长（用于GetPositionInfo响应）
+                currentUri = uri
+                metadataDurationSeconds = durationMs / 1000  // 转换为秒
+                Log.d(TAG, "保存metadata中的时长: ${metadataDurationSeconds}s")
+                Log.d(TAG, "保存当前URI: ${currentUri.take(100)}...")
 
                 // 异步处理播放命令
                 CoroutineScope(Dispatchers.Main).launch {
@@ -340,6 +360,12 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                 Log.d(TAG, "SOAPAction: $soapAction")
                 Log.d(TAG, "请求体: $body")
                 transportState = "STOPPED"
+
+                // 清空当前URI和metadata
+                currentUri = ""
+                currentMetadata = ""
+                metadataDurationSeconds = 0L
+                Log.d(TAG, "已清空当前URI和metadata")
 
                 CoroutineScope(Dispatchers.Main).launch {
                     Log.d(TAG, "执行Stop命令回调")
@@ -420,19 +446,97 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                 val positionMs = positionSeconds * 1000
 
                 // 获取总时长（秒）
-                val durationSeconds = onGetDuration?.invoke() ?: 0L
+                // 优先使用metadata中的duration，如果没有则等待ExoPlayer加载
+                var durationSeconds = onGetDuration?.invoke() ?: 0L
+
+                // **关键修复：如果ExoPlayer的duration为0，使用metadata中的duration作为后备值**
+                // 这解决了B站App第一次查询时ExoPlayer尚未加载导致的duration=0问题
+                if (durationSeconds == 0L && metadataDurationSeconds > 0L) {
+                    Log.d(TAG, "ExoPlayer duration为0，使用metadata中的duration: ${metadataDurationSeconds}s")
+                    durationSeconds = metadataDurationSeconds
+                } else if (durationSeconds == 0L && currentUri.isNotEmpty()) {
+                    // 如果metadata中也没有duration，等待ExoPlayer加载（最多3秒）
+                    Log.d(TAG, "duration未知（metadata中也没有），等待ExoPlayer加载视频...")
+                    val startTime = System.currentTimeMillis()
+                    val timeoutMs = 3000L // 最多等待3秒
+                    val checkIntervalMs = 100L // 每100ms检查一次
+
+                    while (durationSeconds == 0L && System.currentTimeMillis() - startTime < timeoutMs) {
+                        Thread.sleep(checkIntervalMs)
+                        durationSeconds = onGetDuration?.invoke() ?: 0L
+                    }
+                    Log.d(TAG, "等待结果: duration=${durationSeconds}s, 耗时=${System.currentTimeMillis() - startTime}ms")
+                }
 
                 Log.d(TAG, "GetPositionInfo响应: position=${positionSeconds}s, duration=${durationSeconds}s")
                 Log.d(TAG, "进度百分比: ${if (durationSeconds > 0) (positionSeconds * 100 / durationSeconds) else 0}%")
 
-                // 格式化时间为HH:MM:SS格式
+                // 格式化时间为HH:MM:SS格式（DLNA标准格式，有前导零）
                 // 对于无效时长，使用"00:00:00"
                 val relTime = if (positionSeconds >= 0) formatTime(positionSeconds) else "00:00:00"
                 val absTime = relTime
+
+                // TrackDuration使用标准HH:MM:SS格式（某些DLNA客户端期望）
+                // 而TrackMetaData中的res@duration使用毫秒（B站App可能读取这个）
                 val trackDuration = if (durationSeconds > 0) formatTime(durationSeconds) else "00:00:00"
 
-                // 如果没有内容，返回特殊标记
-                val trackMetaData = if (durationSeconds <= 0) "NOT_IMPLEMENTED" else "NOT_IMPLEMENTED"
+                // 转义URI中的特殊字符（XML实体）
+                val escapedUri = currentUri.replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                    .replace("\"", "&quot;")
+
+                // 如果有内容，返回TrackURI，否则返回空
+                val trackUri = if (currentUri.isNotEmpty()) escapedUri else ""
+
+                // 增强metadata：在原始res元素中添加duration属性
+                val trackMetaData = if (currentMetadata.isNotEmpty()) {
+                    // 检查metadata中的res元素是否已有duration属性
+                    val hasResDuration = currentMetadata.contains("<res") && Regex("<res[^>]*duration=").containsMatchIn(currentMetadata)
+
+                    if (!hasResDuration && durationSeconds > 0) {
+                        // 原始res元素没有duration，添加它
+                        Log.d(TAG, "原始res元素缺少duration，添加时长信息")
+                        // **关键修复：使用HH:MM:SS格式（与TrackDuration一致）**
+                        // 很多DLNA客户端期望duration属性使用HH:MM:SS格式
+                        val durationTimeStr = String.format("%02d:%02d:%02d",
+                            durationSeconds / 3600,
+                            (durationSeconds % 3600) / 60,
+                            durationSeconds % 60
+                        )
+
+                        // 注意：currentMetadata已经是转义过的
+                        // 需要先反转义，修改res元素，再转义
+                        var decodedMetadata = currentMetadata
+                            .replace("&lt;", "<")
+                            .replace("&gt;", ">")
+                            .replace("&amp;", "&")
+                            .replace("&quot;", "\"")
+
+                        // 在第一个res元素的protocolInfo之前插入duration属性
+                        val resPattern = Regex("""<res\s+protocolInfo""")
+                        decodedMetadata = resPattern.replace(decodedMetadata, "<res duration=\"$durationTimeStr\" protocolInfo")
+
+                        Log.d(TAG, "增强后的res元素包含duration: $durationTimeStr (HH:MM:SS格式)")
+
+                        // 重新转义为XML格式
+                        decodedMetadata.replace("&", "&amp;")
+                            .replace("<", "&lt;")
+                            .replace(">", "&gt;")
+                            .replace("\"", "&quot;")
+                    } else {
+                        // metadata已经有duration或时长为0，直接使用原metadata
+                        currentMetadata
+                    }
+                } else {
+                    "NOT_IMPLEMENTED"
+                }
+
+                Log.d(TAG, "TrackURI: ${trackUri.take(100)}...")
+                Log.d(TAG, "TrackMetaData: ${trackMetaData.take(150)}...")
+                if (durationSeconds > 0 && !currentMetadata.contains("duration=")) {
+                    Log.d(TAG, "已增强metadata，添加duration: ${formatTime(durationSeconds)}")
+                }
 
                 val responseXml = """
                 <?xml version="1.0"?>
@@ -440,9 +544,10 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                            s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
                     <s:Body>
                         <u:GetPositionInfoResponse xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+                            <Track>0</Track>
                             <TrackDuration>$trackDuration</TrackDuration>
                             <TrackMetaData>$trackMetaData</TrackMetaData>
-                            <TrackURI></TrackURI>
+                            <TrackURI>$trackUri</TrackURI>
                             <RelTime>$relTime</RelTime>
                             <AbsTime>$absTime</AbsTime>
                             <RelCount>2147483647</RelCount>
@@ -477,14 +582,25 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
     }
 
     /**
-     * 格式化时间为HH:MM:SS格式
+     * 格式化时间为HH:MM:SS格式（DLNA常用格式）
      * @param seconds 总秒数
      * @return 格式化的时间字符串
+     *
+     * 注意：虽然UPnP规范定义H+:MM:SS格式，但很多实际DLNA实现（包括B站App）
+     * 期望使用HH:MM:SS格式（小时带前导零）。为了兼容性，我们使用HH:MM:SS格式。
+     *
+     * 格式说明：
+     * - HH: 小时数，2位数字，带前导零（00-99）
+     * - MM: 分钟数，必须是2位数字（00-59）
+     * - SS: 秒数，必须是2位数字（00-59）
+     *
+     * 示例：01:01:02, 00:30:45, 12:05:00
      */
     private fun formatTime(seconds: Long): String {
         val hours = seconds / 3600
         val minutes = (seconds % 3600) / 60
         val secs = seconds % 60
+        // 使用HH:MM:SS格式（所有字段都带前导零）
         return String.format("%02d:%02d:%02d", hours, minutes, secs)
     }
 
@@ -653,6 +769,7 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
      * 获取设备描述文件
      * 伪装成乐播设备（小米电视内置乐播），提高Bilibili兼容性
      * 参考：https://github.com/xfangfang/wiliwili/issues/30
+     * 注意：只修改friendlyName，保留其他字段以避免触发B站反爬虫
      */
     private fun getDeviceDescription(): String {
         val localIp = getLocalIpAddress()
@@ -665,7 +782,7 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                 </specVersion>
                 <device>
                     <deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType>
-                    <friendlyName>小米电视(乐播投屏)</friendlyName>
+                    <friendlyName>FSCast（乐播投屏）</friendlyName>
                     <manufacturer>Xiaomi</manufacturer>
                     <manufacturerURL>http://www.mi.com/</manufacturerURL>
                     <modelName>Lelink Player</modelName>
