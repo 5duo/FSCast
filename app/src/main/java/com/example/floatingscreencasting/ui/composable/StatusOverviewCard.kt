@@ -21,6 +21,7 @@ import com.example.floatingscreencasting.ui.theme.*
 @Composable
 fun StatusOverviewCard(
     isPlaying: Boolean,
+    currentVideoTitle: String,  // 新增参数：用于区分"未投屏"和"已暂停"状态
     isWindowVisible: Boolean,
     audioOutputMode: String,
     phoneDeviceCount: Int,
@@ -53,10 +54,18 @@ fun StatusOverviewCard(
                 )
 
                 StatusUnit(
-                    imageVector = if (isPlaying) MaterialIconsRes.PLAY else MaterialIconsRes.PAUSE,
+                    imageVector = when {
+                        currentVideoTitle.isEmpty() -> MaterialIconsRes.PAUSE
+                        isPlaying -> MaterialIconsRes.PLAY
+                        else -> MaterialIconsRes.PAUSE
+                    },
                     title = "播放状态",
-                    status = if (isPlaying) "播放中" else "已暂停",
-                    isActive = isPlaying,
+                    status = when {
+                        currentVideoTitle.isEmpty() -> "未投屏"
+                        isPlaying -> "播放中"
+                        else -> "已暂停"
+                    },
+                    isActive = currentVideoTitle.isNotEmpty() && isPlaying,
                     modifier = Modifier.weight(1f)
                 )
 

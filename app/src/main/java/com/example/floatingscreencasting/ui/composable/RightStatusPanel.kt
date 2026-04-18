@@ -46,6 +46,7 @@ fun RightStatusPanel(
         // 1. 状态概览卡片
         StatusOverviewCard(
             isPlaying = isPlaying,
+            currentVideoTitle = videoTitle,  // 传递视频标题参数
             isWindowVisible = isWindowVisible,
             audioOutputMode = audioOutputMode,
             phoneDeviceCount = phoneDeviceCount,

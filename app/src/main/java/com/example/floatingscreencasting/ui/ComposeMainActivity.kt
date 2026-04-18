@@ -317,8 +317,34 @@ class ComposeMainActivity : AppCompatActivity() {
         val wasPlaying = uiState.value.isPlaying
         Log.d("ComposeMainActivity", "切换播放状态: 当前=$wasPlaying")
 
+        // 检查是否有视频内容
+        if (uiState.value.currentVideoTitle.isEmpty() && !wasPlaying) {
+            // 没有视频内容且当前未播放，显示提示
+            Toast.makeText(this, "请先投屏视频", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // 准备新的状态
+        val newPlayingState = !wasPlaying
+        val newCastingStatus = if (newPlayingState) {
+            if (uiState.value.currentVideoTitle.isNotEmpty()) {
+                "${uiState.value.currentVideoTitle} (正在投屏)"
+            } else {
+                "正在投屏"
+            }
+        } else {
+            if (uiState.value.currentVideoTitle.isNotEmpty()) {
+                "${uiState.value.currentVideoTitle} (已暂停)"
+            } else {
+                "已暂停"
+            }
+        }
+
         // 立即更新UI状态（乐观更新）
-        _uiState.value = uiState.value.copy(isPlaying = !wasPlaying)
+        _uiState.value = uiState.value.copy(
+            isPlaying = newPlayingState,
+            castingStatus = newCastingStatus
+        )
 
         // 执行播放器操作（ExoPlayer方法是线程安全的）
         try {
@@ -335,10 +361,14 @@ class ComposeMainActivity : AppCompatActivity() {
     }
 
     private fun stop() {
+        // 清除播放信息，更新为停止状态
         _uiState.value = uiState.value.copy(
             isPlaying = false,
+            castingStatus = "停止播放",
             currentPosition = 0,
-            duration = 0
+            duration = 0,
+            currentVideoTitle = "",  // 清除视频标题
+            currentVideoUrl = ""     // 清除视频URL
         )
         try {
             videoPresentation?.stop()
@@ -1168,8 +1198,15 @@ class ComposeMainActivity : AppCompatActivity() {
                 Log.d("ComposeMainActivity", "收到暂停回调")
                 try {
                     videoPresentation?.pause()
-                    // 暂停播放
-                    _uiState.value = uiState.value.copy(isPlaying = false)
+                    // 暂停播放，保留播放信息，状态显示"已暂停"
+                    _uiState.value = uiState.value.copy(
+                        isPlaying = false,
+                        castingStatus = if (uiState.value.currentVideoTitle.isNotEmpty()) {
+                            "${uiState.value.currentVideoTitle} (已暂停)"
+                        } else {
+                            "已暂停"
+                        }
+                    )
                 } catch (e: Exception) {
                     Log.e("ComposeMainActivity", "暂停播放失败", e)
                 }
@@ -1179,8 +1216,15 @@ class ComposeMainActivity : AppCompatActivity() {
                 Log.d("ComposeMainActivity", "收到恢复播放回调")
                 try {
                     videoPresentation?.play()
-                    // 恢复播放
-                    _uiState.value = uiState.value.copy(isPlaying = true)
+                    // 恢复播放，状态显示"正在投屏"或视频标题
+                    _uiState.value = uiState.value.copy(
+                        isPlaying = true,
+                        castingStatus = if (uiState.value.currentVideoTitle.isNotEmpty()) {
+                            "${uiState.value.currentVideoTitle} (正在投屏)"
+                        } else {
+                            "正在投屏"
+                        }
+                    )
                 } catch (e: Exception) {
                     Log.e("ComposeMainActivity", "恢复播放失败", e)
                 }
