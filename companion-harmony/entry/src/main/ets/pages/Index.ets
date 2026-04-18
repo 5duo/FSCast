@@ -338,6 +338,7 @@ struct Index {
 
       // 进入手机播放模式（启用双向同步）
       this.isPhoneMode = true
+      this.videoPlayer.setPhoneMode(true)
 
       hilog.info(DOMAIN, TAG, `已更新dlnaUri，Video组件会自动播放，已进入手机播放模式`)
     })
@@ -355,6 +356,7 @@ struct Index {
 
       // 进入手机播放模式（启用双向同步）
       this.isPhoneMode = true
+      this.videoPlayer.setPhoneMode(true)
 
       // 等待视频加载后跳转并暂停
       hilog.info(DOMAIN, TAG, `等待视频加载...`)
@@ -399,37 +401,34 @@ struct Index {
       this.dlnaPosition = position
     })
 
-    // 进度更新回调
+    // 进度更新回调（状态优先级同步）
     this.carWebSocketClient.setOnProgressUpdate((position: number, duration: number, isPlaying: boolean) => {
       hilog.info(DOMAIN, TAG, `收到进度更新: ${position}/${duration}, playing=${isPlaying}, prepared=${this.mainVideoPrepared}`)
 
       // 更新UI状态
       this.dlnaPosition = position
       this.dlnaDuration = duration
-      this.dlnaIsPlaying = isPlaying
 
-      // 优化的同步策略：每5秒检查一次进度差异
-      // 如果差异超过3秒，执行平滑对齐（减少卡顿）
-      if (this.mainVideoPrepared) {
-        // 计算进度差异（手机实际进度 vs 车机端进度）
-        const positionDiff = Math.abs(this.phoneActualPosition - position)
+      // 【状态优先】先同步播放状态，再同步进度
+      if (this.dlnaIsPlaying !== isPlaying) {
+        hilog.info(DOMAIN, TAG, `播放状态变化: ${this.dlnaIsPlaying} -> ${isPlaying}`)
 
-        hilog.info(DOMAIN, TAG, `进度检查: 手机${this.phoneActualPosition}ms, 车机${position}ms, 差异${positionDiff}ms`)
-
-        // 差异超过3秒时执行平滑对齐（优化：从1秒提高到3秒，减少不必要的重新对齐）
-        if (positionDiff > 3000) {
-          hilog.info(DOMAIN, TAG, `========================================`)
-          hilog.info(DOMAIN, TAG, `进度差异过大(${positionDiff}ms)，执行平滑对齐`)
-          // 平滑同步：直接调整进度，不暂停播放（优化：减少播放中断和卡顿）
-          const positionSeconds = Math.floor(position / 1000)
-          hilog.info(DOMAIN, TAG, `平滑对齐到 ${positionSeconds}s`)
-          this.mainVideoController.setCurrentTime(positionSeconds)
-          // 不暂停，保持播放状态（如果正在播放）
-          if (this.dlnaIsPlaying) {
-            hilog.info(DOMAIN, TAG, `保持播放状态，平滑对齐完成`)
-          }
-          hilog.info(DOMAIN, TAG, `========================================`)
+        // 同步播放状态
+        if (isPlaying) {
+          this.mainVideoController.start()
+        } else {
+          this.mainVideoController.pause()
         }
+
+        this.dlnaIsPlaying = isPlaying
+      }
+
+      // 然后同步进度（只在播放状态下）
+      if (isPlaying && this.mainVideoPrepared) {
+        // 使用VideoPlayer的同步机制（已优化：动态阈值、防抖、平滑seek）
+        this.videoPlayer.syncProgress(position, duration, isPlaying)
+      } else {
+        hilog.debug(DOMAIN, TAG, '暂停状态下不执行进度同步')
       }
     })
 
@@ -886,6 +885,7 @@ struct Index {
 
       // 退出手机播放模式
       this.isPhoneMode = false
+      this.videoPlayer.setPhoneMode(false)
 
       // 停止后台服务和媒体会话
       await this.backgroundService.stop()
@@ -899,8 +899,19 @@ struct Index {
 
   /**
    * 跳转（支持双向同步）
+   * 添加操作锁机制，防止两端同时操作产生冲突
    */
   private async seekVideo(position: number): Promise<void> {
+    // 检查操作锁（2秒内不允许重复操作）
+    const now = Date.now()
+    if (now - this.lastSeekTime < 2000) {
+      hilog.warn(DOMAIN, TAG, 'Seek操作被锁阻止（距离上次操作不足2秒）')
+      return
+    }
+
+    // 更新锁时间
+    this.lastSeekTime = now
+
     try {
       await this.videoPlayer.seek(position)
       this.dlnaPosition = position

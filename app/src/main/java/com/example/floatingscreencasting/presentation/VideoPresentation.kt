@@ -19,10 +19,12 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.example.floatingscreencasting.cache.VideoCacheManager
+import com.example.floatingscreencasting.events.PlaybackEndEvent
 import com.example.floatingscreencasting.R
 import com.example.floatingscreencasting.databinding.PresentationVideoBinding
 import com.example.floatingscreencasting.history.PlaybackHistoryManager
 import com.example.floatingscreencasting.utils.UriUtils
+import org.greenrobot.eventbus.EventBus
 import java.net.CookieManager
 
 /**
@@ -330,6 +332,15 @@ class VideoPresentation(
                                 android.util.Log.d("VideoPresentation", "播放结束")
                                 // 播放结束，显示等待提示
                                 binding.waitingContainer.isVisible = true
+
+                                // 发送播放结束事件到MainActivity
+                                try {
+                                    val currentPosition = currentPosition
+                                    EventBus.getDefault().post(PlaybackEndEvent(currentPosition))
+                                    android.util.Log.d("VideoPresentation", "已发送播放结束事件，位置: ${currentPosition}ms")
+                                } catch (e: Exception) {
+                                    android.util.Log.e("VideoPresentation", "发送播放结束事件失败", e)
+                                }
                             }
                             Player.STATE_BUFFERING -> {
                                 android.util.Log.d("VideoPresentation", "缓冲中...")

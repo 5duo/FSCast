@@ -214,8 +214,15 @@ export class VideoPlayer {
 
   /**
    * 同步播放进度（从车机端同步）
+   * 优化版本：动态阈值、平滑seek、防抖机制
    */
   syncProgress(position: number, duration: number, isPlaying: boolean): void {
+    // 只有在手机播放模式下才同步进度
+    if (!this.isPhoneMode) {
+      hilog.debug(DOMAIN, TAG, '非手机播放模式，忽略进度同步')
+      return
+    }
+
     // 只有在视频真正开始播放后才允许同步
     // 如果currentPosition为0，说明视频还没开始播放，不要同步
     if (this.currentPosition === 0) {
@@ -223,11 +230,102 @@ export class VideoPlayer {
       return
     }
 
-    // 如果差异超过1秒，进行同步
-    if (Math.abs(this.currentPosition - position) > 1000) {
-      hilog.debug(DOMAIN, TAG, `Syncing progress: ${this.currentPosition} -> ${position}`)
-      this.seek(position)
+    // 清除之前的防抖定时器
+    if (this.seekDebounceTimer !== -1) {
+      clearTimeout(this.seekDebounceTimer)
     }
+
+    // 设置防抖定时器
+    this.seekDebounceTimer = setTimeout(() => {
+      this.executeSync(position, duration, isPlaying)
+    }, this.SEEK_DEBOUNCE_DELAY)
+  }
+
+  /**
+   * 执行进度同步（内部方法，在防抖后调用）
+   */
+  private executeSync(position: number, duration: number, isPlaying: boolean): void {
+    // 计算动态同步阈值
+    const threshold = this.calculateSyncThreshold(duration)
+
+    // 计算差异
+    const difference = Math.abs(this.currentPosition - position)
+
+    // 只有差异超过阈值才同步
+    if (difference > threshold) {
+      hilog.info(DOMAIN, TAG, `进度差异 ${difference}ms > ${threshold}ms，执行同步`)
+
+      // 平滑同步：不直接跳转，而是使用平滑调整
+      this.smoothSeek(position)
+    } else {
+      hilog.debug(DOMAIN, TAG, `进度差异 ${difference}ms <= ${threshold}ms，不同步`)
+    }
+  }
+
+  /**
+   * 根据视频长度计算同步阈值
+   * 短视频（< 5分钟）：1秒阈值
+   * 中等视频（5-30分钟）：2秒阈值
+   * 长视频（> 30分钟）：3秒阈值
+   */
+  private calculateSyncThreshold(duration: number): number {
+    if (duration <= 0) {
+      return 1000 // 默认1秒
+    }
+
+    // 短视频（< 5分钟）：1秒阈值
+    if (duration < 300000) {
+      return 1000
+    }
+
+    // 中等视频（5-30分钟）：2秒阈值
+    if (duration < 1800000) {
+      return 2000
+    }
+
+    // 长视频（> 30分钟）：3秒阈值
+    return 3000
+  }
+
+  /**
+   * 平滑seek：避免卡顿
+   * 小跳转（< 10秒）：直接跳转
+   * 大跳转：分段跳转（避免缓冲打断）
+   */
+  private async smoothSeek(targetPosition: number): Promise<void> {
+    const currentPosition = this.currentPosition
+    const difference = targetPosition - currentPosition
+
+    // 小跳转（< 10秒）：直接跳转
+    if (Math.abs(difference) < 10000) {
+      await this.seek(targetPosition)
+      return
+    }
+
+    // 大跳转：分段跳转（避免缓冲打断）
+    hilog.info(DOMAIN, TAG, `大跳转：${currentPosition} -> ${targetPosition}，分段执行`)
+    const steps = 5
+    const stepSize = difference / steps
+
+    for (let i = 1; i <= steps; i++) {
+      const intermediatePosition = currentPosition + (stepSize * i)
+      hilog.debug(DOMAIN, TAG, `分段跳转 ${i}/${steps}: ${intermediatePosition}ms`)
+      await this.seek(intermediatePosition)
+
+      // 等待缓冲（100ms）
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+
+    hilog.info(DOMAIN, TAG, '分段跳转完成')
+  }
+
+  /**
+   * 设置手机播放模式
+   * 用于标识当前是否在手机播放模式（启用进度同步）
+   */
+  setPhoneMode(enabled: boolean): void {
+    this.isPhoneMode = enabled
+    hilog.info(DOMAIN, TAG, `手机播放模式: ${enabled}`)
   }
 
   /**

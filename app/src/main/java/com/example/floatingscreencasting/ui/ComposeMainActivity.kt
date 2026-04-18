@@ -39,6 +39,7 @@ import com.example.floatingscreencasting.dlna.PhoneDeviceManager
 import com.example.floatingscreencasting.data.remote.dlna.DlnaControlPoint
 import com.example.floatingscreencasting.data.remote.dlna.DlnaRendererService
 import com.example.floatingscreencasting.events.MuteEvent
+import com.example.floatingscreencasting.events.PlaybackEndEvent
 import com.example.floatingscreencasting.presentation.VideoPresentation
 import com.example.floatingscreencasting.presentation.SingleScreenVideoDialog
 import com.example.floatingscreencasting.ui.screen.PlayerControlScreen
@@ -1498,6 +1499,25 @@ class ComposeMainActivity : AppCompatActivity() {
     @Subscribe(threadMode = ThreadMode.MAIN)
     fun onMuteEvent(event: MuteEvent) {
         _uiState.value = uiState.value.copy(isMuted = event.isMuted)
+    }
+
+    @Subscribe(threadMode = ThreadMode.MAIN)
+    fun onPlaybackEndEvent(event: PlaybackEndEvent) {
+        Log.i("ComposeMainActivity", "收到播放结束事件，位置: ${event.position}ms")
+
+        // 更新UI状态
+        _uiState.value = uiState.value.copy(
+            isPlaying = false,
+            castingStatus = "播放结束"
+        )
+
+        // 如果在手机模式，发送停止命令到手机
+        lifecycleScope.launch {
+            if (audioOutputController.getCurrentMode() == AudioOutputController.OutputMode.PHONE) {
+                Log.i("ComposeMainActivity", "手机模式：发送停止命令到手机端")
+                audioOutputController.stop()
+            }
+        }
     }
 
     // ==================== 生命周期 ====================

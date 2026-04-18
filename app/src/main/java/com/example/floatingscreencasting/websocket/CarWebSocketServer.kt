@@ -8,6 +8,7 @@ import org.java_websocket.WebSocket
 import org.java_websocket.handshake.ClientHandshake
 import org.java_websocket.server.WebSocketServer
 import java.net.InetSocketAddress
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 车机端WebSocket服务器
@@ -26,6 +27,9 @@ class CarWebSocketServer(private val port: Int) : WebSocketServer(InetSocketAddr
 
     // 已连接的客户端（使用线程安全的ConcurrentHashMap）
     private val clients = java.util.concurrent.ConcurrentHashMap<String, WebSocket>()
+
+    // 消息序列号生成器（用于进度同步的去重和乱序处理）
+    private val messageSequenceNumber = AtomicLong(0)
 
     // 连接状态
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
@@ -220,9 +224,12 @@ class CarWebSocketServer(private val port: Int) : WebSocketServer(InetSocketAddr
 
     /**
      * 发送进度同步到手机端
+     * 添加序列号和时间戳，用于防止消息乱序和去重
      */
     fun sendProgressUpdate(positionMs: Long, durationMs: Long, isPlaying: Boolean): Int {
+        val sequenceNumber = messageSequenceNumber.incrementAndGet()
         val command = buildJsonCommand("progress") {
+            put("sequenceNumber", sequenceNumber)
             put("position", positionMs)
             put("duration", durationMs)
             put("isPlaying", isPlaying)

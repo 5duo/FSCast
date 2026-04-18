@@ -14,6 +14,69 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
+ * 操作锁
+ * 防止两端同时操作产生冲突（如同时拖动进度条）
+ */
+class OperationLock {
+    private var lastOperationId: String = ""
+    private var lastOperationTime: Long = 0
+    private val lockTimeout = 2000L // 2秒超时
+
+    /**
+     * 检查本地操作是否应该执行
+     * @return true 如果可以执行，false 如果被锁阻止
+     */
+    fun shouldExecuteLocalOperation(operationId: String): Boolean {
+        val now = System.currentTimeMillis()
+
+        // 如果上一个操作太久远，锁已释放
+        if (now - lastOperationTime > lockTimeout) {
+            lastOperationId = operationId
+            lastOperationTime = now
+            Log.d("OperationLock", "本地操作获取锁: $operationId")
+            return true
+        }
+
+        // 检查是否是同一操作的重复
+        if (lastOperationId == operationId) {
+            Log.d("OperationLock", "本地操作被阻止（重复）: $operationId")
+            return false
+        }
+
+        // 新操作，获取锁
+        lastOperationId = operationId
+        lastOperationTime = now
+        Log.d("OperationLock", "本地操作获取锁: $operationId")
+        return true
+    }
+
+    /**
+     * 检查远程操作是否应该执行
+     * @return true 如果可以执行，false 如果被锁阻止
+     */
+    fun shouldExecuteRemoteOperation(operationId: String, timestamp: Long): Boolean {
+        val now = System.currentTimeMillis()
+
+        // 远程操作太旧，拒绝
+        if (now - timestamp > lockTimeout) {
+            Log.w("OperationLock", "远程操作被阻止（过期）: $operationId, age=${now - timestamp}ms")
+            return false
+        }
+
+        // 比较时间戳，最新的操作胜出
+        if (timestamp > lastOperationTime) {
+            lastOperationId = operationId
+            lastOperationTime = now
+            Log.d("OperationLock", "远程操作获取锁: $operationId")
+            return true
+        }
+
+        Log.d("OperationLock", "远程操作被阻止（旧操作）: $operationId")
+        return false
+    }
+}
+
+/**
  * 音频输出控制器
  * 协调车机和手机端的播放状态
  */
@@ -43,6 +106,9 @@ class AudioOutputController(
 
     // WebSocket服务器引用（可更新，用于服务器重启场景）
     private var webSocketServer: CarWebSocketServer? = webSocketServer
+
+    // 操作锁：防止两端同时操作产生冲突
+    private val operationLock = OperationLock()
 
     // 命令循环避免：缓存已处理的命令ID（10秒TTL）
     private val processedCommands = mutableMapOf<String, Long>()
@@ -355,6 +421,19 @@ class AudioOutputController(
      */
     suspend fun seek(positionMs: Long, syncId: String? = null): Boolean {
         Log.d(TAG, "seek调用: positionMs=$positionMs, syncId=$syncId, mode=$currentMode")
+
+        // 生成操作ID
+        val operationId = if (syncId != null) {
+            "remote_seek_${syncId}"
+        } else {
+            "local_seek_${System.currentTimeMillis()}"
+        }
+
+        // 检查操作锁
+        if (!operationLock.shouldExecuteLocalOperation(operationId)) {
+            Log.d(TAG, "Seek操作被锁阻止: $operationId")
+            return false
+        }
 
         return when (currentMode) {
             OutputMode.SPEAKER -> {
