@@ -256,8 +256,9 @@ class DlnaRendererService(private val context: Context) {
         }
 
         // 保存投屏请求（用于同步到手机端）
-        // 处理B站App的占位符标题格式
+        // 处理B站App的占位符标题格式：空、"studio_video_xxx"、"video"
         val savedTitle = if (mediaMetadata.title.isBlank() ||
+                            mediaMetadata.title == "video" ||
                             mediaMetadata.title.startsWith("studio_video_") ||
                             mediaMetadata.title.matches(Regex("studio_video_\\d+"))) {
             UriUtils.extractTitleFromUri(uri)
@@ -277,8 +278,9 @@ class DlnaRendererService(private val context: Context) {
 
             // 通过EventBus或回调通知Presentation播放视频
             // 传递标题和时长信息
-            // 处理B站App的占位符标题格式
+            // 处理B站App的占位符标题格式：空、"studio_video_xxx"、"video"
             val displayTitle = if (mediaMetadata.title.isBlank() ||
+                                  mediaMetadata.title == "video" ||
                                   mediaMetadata.title.startsWith("studio_video_") ||
                                   mediaMetadata.title.matches(Regex("studio_video_\\d+"))) {
                 UriUtils.extractTitleFromUri(uri)
@@ -292,8 +294,9 @@ class DlnaRendererService(private val context: Context) {
             Log.d(TAG, "onPlayMedia回调已调用，标题: $displayTitle")
 
             // 使用metadata中的标题，如果没有或是占位符格式则从URL提取
-            // B站App有时会发送"studio_video_xxx"格式的占位符标题
+            // B站App有时会发送"studio_video_xxx"或"video"格式的占位符标题
             val title = if (mediaMetadata.title.isBlank() ||
+                           mediaMetadata.title == "video" ||
                            mediaMetadata.title.startsWith("studio_video_") ||
                            mediaMetadata.title.matches(Regex("studio_video_\\d+"))) {
                 UriUtils.extractTitleFromUri(uri)

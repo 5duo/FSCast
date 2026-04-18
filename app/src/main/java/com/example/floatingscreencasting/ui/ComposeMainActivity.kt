@@ -1161,8 +1161,13 @@ class ComposeMainActivity : AppCompatActivity() {
                         videoPresentation?.playMedia(uri, title, durationMs)
                         if (uri.isNotEmpty()) {
                             dlnaService.updateTransportState("PLAYING")
-                            // 使用metadata中的标题，如果没有则从URL提取
-                            val finalTitle = title.ifBlank { extractVideoTitle(uri) }
+                            // 使用metadata中的标题，处理B站占位符：空、"video"、"studio_video_xxx"
+                            val finalTitle = if (title.isBlank() || title == "video" ||
+                                title.startsWith("studio_video_") || title.matches(Regex("studio_video_\\d+"))) {
+                                extractVideoTitle(uri)
+                            } else {
+                                title
+                            }
                             // 播放开始，更新视频信息
                             _uiState.value = uiState.value.copy(
                                 isPlaying = true,
@@ -1361,23 +1366,26 @@ class ComposeMainActivity : AppCompatActivity() {
         progressUpdateJob = progressUpdateScope.launch {
             while (isActive) {
                 try {
-                    val player = videoPresentation?.getExoPlayer()
-                    if (player != null) {
-                        val currentPosition = player.currentPosition / 1000
-                        val duration = player.duration / 1000
-                        val isPlaying = player.isPlaying
+                    // 只有在有视频内容时才更新进度
+                    if (_uiState.value.currentVideoTitle.isNotEmpty()) {
+                        val player = videoPresentation?.getExoPlayer()
+                        if (player != null) {
+                            val currentPosition = player.currentPosition / 1000
+                            val duration = player.duration / 1000
+                            val isPlaying = player.isPlaying
 
-                        // 只在值发生实际变化时更新UI
-                        if (_uiState.value.currentPosition != currentPosition ||
-                            _uiState.value.duration != duration ||
-                            _uiState.value.isPlaying != isPlaying) {
+                            // 只在值发生实际变化时更新UI
+                            if (_uiState.value.currentPosition != currentPosition ||
+                                _uiState.value.duration != duration ||
+                                _uiState.value.isPlaying != isPlaying) {
 
-                            _uiState.value = _uiState.value.copy(
-                                isPlaying = isPlaying,
-                                currentPosition = currentPosition,
-                                duration = duration
-                            )
-                            // 注意：进度同步由AudioOutputController内部的定时器自动处理，不需要在这里调用
+                                _uiState.value = _uiState.value.copy(
+                                    isPlaying = isPlaying,
+                                    currentPosition = currentPosition,
+                                    duration = duration
+                                )
+                                // 注意：进度同步由AudioOutputController内部的定时器自动处理，不需要在这里调用
+                            }
                         }
                     }
                 } catch (e: Exception) {
