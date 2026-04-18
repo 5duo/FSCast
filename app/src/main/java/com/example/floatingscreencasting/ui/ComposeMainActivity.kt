@@ -579,6 +579,8 @@ class ComposeMainActivity : AppCompatActivity() {
                 if (audioOutputController.getCurrentMode() == AudioOutputController.OutputMode.PHONE) {
                     Log.i("ComposeMainActivity", "手机端断开，自动切换回扬声器模式")
                     audioOutputController.switchOutputMode(AudioOutputController.OutputMode.SPEAKER)
+                    // 同步更新UI状态，确保显示和实际状态一致
+                    _uiState.value = uiState.value.copy(audioOutputMode = "speaker")
                 }
                 Toast.makeText(this@ComposeMainActivity, "FSCast Remote已断开，已切换回扬声器", Toast.LENGTH_SHORT).show()
                 _uiState.value = uiState.value.copy(
@@ -628,6 +630,8 @@ class ComposeMainActivity : AppCompatActivity() {
                             Toast.makeText(this@ComposeMainActivity, "手机端错误: $errorMessage", Toast.LENGTH_LONG).show()
                             // 自动切换回扬声器模式
                             audioOutputController.switchOutputMode(AudioOutputController.OutputMode.SPEAKER)
+                            // 同步更新UI状态
+                            _uiState.value = uiState.value.copy(audioOutputMode = "speaker")
                         }
                     }
                     "connected" -> {
