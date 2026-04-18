@@ -1193,13 +1193,15 @@ class ComposeMainActivity : AppCompatActivity() {
                 Log.d("ComposeMainActivity", "收到停止回调")
                 try {
                     videoPresentation?.stop()
-                    // 停止播放，但保持悬浮窗显示，恢复到初始状态
+                    // 停止播放，恢复到初始状态，清除所有播放信息（和车机端stop按钮一样）
                     videoPresentation?.resetToInitialState()
                     _uiState.value = uiState.value.copy(
                         isPlaying = false,
                         castingStatus = "等待投屏",
                         currentPosition = 0,
-                        duration = 0
+                        duration = 0,
+                        currentVideoTitle = "",  // 清除视频标题
+                        currentVideoUrl = ""     // 清除视频URL
                     )
                 } catch (e: Exception) {
                     Log.e("ComposeMainActivity", "停止播放失败", e)
