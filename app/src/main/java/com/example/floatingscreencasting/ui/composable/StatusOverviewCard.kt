@@ -24,8 +24,8 @@ fun StatusOverviewCard(
     currentVideoTitle: String,  // 新增参数：用于区分"未投屏"和"已暂停"状态
     isWindowVisible: Boolean,
     audioOutputMode: String,
-    phoneDeviceCount: Int,
-    isWebSocketServerRunning: Boolean,  // 新增参数
+    webSocketClientCount: Int,  // WebSocket连接的手机数量
+    isWebSocketServerRunning: Boolean,  // WebSocket服务器是否运行
     onRestartWebSocket: () -> Unit,
     onScanDevices: () -> Unit,
     modifier: Modifier = Modifier
@@ -69,7 +69,7 @@ fun StatusOverviewCard(
                     modifier = Modifier.weight(1f)
                 )
 
-                // WebSocket服务器状态（改为普通状态单元，点击可重启）
+                // WebSocket服务器状态（只显示运行状态，点击可重启）
                 StatusUnit(
                     imageVector = MaterialIconsRes.CONNECTION,
                     title = "WebSocket服务",
@@ -96,8 +96,8 @@ fun StatusOverviewCard(
                 StatusUnit(
                     imageVector = MaterialIconsRes.CONNECTION,
                     title = "连接状态",
-                    status = if (phoneDeviceCount > 0) "$phoneDeviceCount 设备" else "未连接",
-                    isActive = phoneDeviceCount > 0,
+                    status = if (webSocketClientCount > 0) "$webSocketClientCount 设备" else "未连接",
+                    isActive = webSocketClientCount > 0,
                     modifier = Modifier.weight(1f)
                 )
 

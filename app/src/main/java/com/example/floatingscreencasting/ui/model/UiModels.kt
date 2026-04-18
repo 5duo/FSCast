@@ -25,7 +25,7 @@ data class MainUiState(
     val lastPlayedProgress: Int = 0,
     val audioOutputMode: String = "speaker",
     val connectedPhoneDevice: String? = null,
-    val phoneDeviceCount: Int = 0,
+    val webSocketClientCount: Int = 0,  // WebSocket连接的手机数量
 
     // 当前播放视频信息
     val currentVideoTitle: String = "",

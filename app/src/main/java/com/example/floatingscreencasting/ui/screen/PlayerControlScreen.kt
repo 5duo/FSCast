@@ -101,7 +101,7 @@ fun PlayerControlScreen(
                 castingStatus = uiState.castingStatus,
                 isWindowVisible = uiState.isWindowVisible,
                 audioOutputMode = uiState.audioOutputMode,
-                phoneDeviceCount = uiState.phoneDeviceCount,
+                webSocketClientCount = uiState.webSocketClientCount,
                 videoTitle = uiState.currentVideoTitle,
                 videoUrl = uiState.currentVideoUrl,
                 isWebSocketServerRunning = uiState.isWebSocketServerRunning,

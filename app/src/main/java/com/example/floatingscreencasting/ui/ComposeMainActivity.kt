@@ -474,26 +474,13 @@ class ComposeMainActivity : AppCompatActivity() {
 
     /**
      * 扫描手机设备
+     * 注意：现在使用WebSocket连接，这个函数已废弃，仅为保留UI按钮
      */
     private fun scanPhoneDevices() {
         lifecycleScope.launch {
             Toast.makeText(
                 this@ComposeMainActivity,
-                "正在扫描DLNA设备...",
-                Toast.LENGTH_SHORT
-            ).show()
-
-            // 触发DLNA设备重新发现
-            // DlnaDmcClient会自动定期发现设备，这里只是提示用户
-            delay(2000) // 模拟扫描延迟
-
-            // 更新设备数量（从PhoneDeviceManager获取）
-            val deviceCount = phoneDeviceManager.getDeviceCount()
-            _uiState.value = uiState.value.copy(phoneDeviceCount = deviceCount)
-
-            Toast.makeText(
-                this@ComposeMainActivity,
-                "扫描完成，发现 $deviceCount 个设备",
+                "请使用手机连接车机的IP地址",
                 Toast.LENGTH_SHORT
             ).show()
         }
@@ -562,7 +549,7 @@ class ComposeMainActivity : AppCompatActivity() {
                 Toast.makeText(this@ComposeMainActivity, "FSCast Remote已连接", Toast.LENGTH_SHORT).show()
                 _uiState.value = uiState.value.copy(
                     connectedPhoneDevice = "FSCast Remote",
-                    phoneDeviceCount = 1
+                    webSocketClientCount = 1
                 )
             }
         }
@@ -578,7 +565,7 @@ class ComposeMainActivity : AppCompatActivity() {
                 Toast.makeText(this@ComposeMainActivity, "FSCast Remote已断开，已切换回扬声器", Toast.LENGTH_SHORT).show()
                 _uiState.value = uiState.value.copy(
                     connectedPhoneDevice = null,
-                    phoneDeviceCount = 0
+                    webSocketClientCount = 0
                 )
             }
         }
@@ -1058,47 +1045,6 @@ class ComposeMainActivity : AppCompatActivity() {
 
         // 启动DLNA DMC客户端（开始发现手机设备）
         dlnaDmcClient.start()
-
-        // 监听WebSocket连接状态
-        webSocketServer.onClientConnected = { clientId ->
-            Log.i("ComposeMainActivity", "手机端已连接: $clientId")
-            lifecycleScope.launch {
-                Toast.makeText(this@ComposeMainActivity, "FSCast Remote已连接", Toast.LENGTH_SHORT).show()
-                // 更新UI状态，显示已连接设备
-                _uiState.value = uiState.value.copy(
-                    connectedPhoneDevice = "FSCast Remote",
-                    phoneDeviceCount = 1
-                )
-            }
-        }
-
-        webSocketServer.onClientDisconnected = { clientId ->
-            Log.i("ComposeMainActivity", "手机端已断开: $clientId")
-            lifecycleScope.launch {
-                // 如果当前是手机模式，自动切换回扬声器模式
-                if (audioOutputController.getCurrentMode() == AudioOutputController.OutputMode.PHONE) {
-                    Log.i("ComposeMainActivity", "手机端断开，自动切换回扬声器模式")
-                    audioOutputController.switchOutputMode(AudioOutputController.OutputMode.SPEAKER)
-                }
-                Toast.makeText(this@ComposeMainActivity, "FSCast Remote已断开，已切换回扬声器", Toast.LENGTH_SHORT).show()
-                // 更新UI状态，清除连接设备
-                _uiState.value = uiState.value.copy(
-                    connectedPhoneDevice = null,
-                    phoneDeviceCount = 0
-                )
-            }
-        }
-        dlnaDmcClient.start()
-
-        // 监听设备列表变化
-        dlnaDmcClient.onDeviceListChanged = { devices ->
-            phoneDeviceManager.updateDevices(devices)
-            _uiState.value = uiState.value.copy(
-                phoneDeviceCount = devices.size,
-                connectedPhoneDevice = phoneDeviceManager.getSelectedDevice()?.friendlyName
-            )
-            Log.d("ComposeMainActivity", "发现 ${devices.size} 个DLNA设备")
-        }
 
         Log.d("ComposeMainActivity", "音频输出控制器初始化完成")
     }

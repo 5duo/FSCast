@@ -27,10 +27,10 @@ fun RightStatusPanel(
     castingStatus: String,
     isWindowVisible: Boolean,
     audioOutputMode: String,
-    phoneDeviceCount: Int,
+    webSocketClientCount: Int,  // WebSocket连接的手机数量
     videoTitle: String,
     videoUrl: String,
-    isWebSocketServerRunning: Boolean,  // 新增参数
+    isWebSocketServerRunning: Boolean,  // WebSocket服务器是否运行
     onSeek: (Long) -> Unit,
     onRestartWebSocket: () -> Unit,
     onScanDevices: () -> Unit,
@@ -49,8 +49,8 @@ fun RightStatusPanel(
             currentVideoTitle = videoTitle,  // 传递视频标题参数
             isWindowVisible = isWindowVisible,
             audioOutputMode = audioOutputMode,
-            phoneDeviceCount = phoneDeviceCount,
-            isWebSocketServerRunning = isWebSocketServerRunning,  // 新增参数
+            webSocketClientCount = webSocketClientCount,  // 传递WebSocket连接数量
+            isWebSocketServerRunning = isWebSocketServerRunning,
             onRestartWebSocket = onRestartWebSocket,
             onScanDevices = onScanDevices,
             modifier = Modifier.fillMaxWidth()
