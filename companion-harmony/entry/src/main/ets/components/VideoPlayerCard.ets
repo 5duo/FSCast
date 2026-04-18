@@ -1,10 +1,11 @@
 /**
  * 视频播放器卡片组件（优化版）
- * 使用 HarmonyOS SymbolGlyph 系统图标
+ * 使用兼容性图标组件
  */
 import { hilog } from '@kit.PerformanceAnalysisKit'
 import { AppColors, AppSizes } from './StatusPanel'
 import { SysIcons } from '../constants/IconResources'
+import { TextIcon } from './IconCompat'
 
 const TAG = 'VideoPlayerCard'
 const DOMAIN = 0x0000
@@ -94,10 +95,12 @@ export struct VideoPlayerCard {
       } else {
         // 等待URL占位符
         Column() {
-          // 暂停图标 - 使用系统图标
-          SymbolGlyph($r(`sys.symbol.${SysIcons.PAUSE}`))
-            .fontSize(48)
-            .fontColor([AppColors.TEXT_DISABLED])
+          // 暂停图标 - 使用兼容性图标
+          TextIcon({
+            iconKey: 'PAUSE',
+            fontSize: 48,
+            fontColor: AppColors.TEXT_DISABLED
+          })
             .margin({ bottom: AppSizes.SPACING_MD })
 
           // 提示文字

@@ -35,14 +35,14 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.example.floatingscreencasting.dlna.AudioOutputController
-import com.example.floatingscreencasting.dlna.DlnaDmcClient
-import com.example.floatingscreencasting.dlna.DlnaDmrService
 import com.example.floatingscreencasting.dlna.PhoneDeviceManager
+import com.example.floatingscreencasting.data.remote.dlna.DlnaControlPoint
+import com.example.floatingscreencasting.data.remote.dlna.DlnaRendererService
 import com.example.floatingscreencasting.events.MuteEvent
 import com.example.floatingscreencasting.presentation.VideoPresentation
 import com.example.floatingscreencasting.presentation.SingleScreenVideoDialog
-import com.example.floatingscreencasting.ui.composable.*
-import com.example.floatingscreencasting.ui.debug.AudioDebugPanel
+import com.example.floatingscreencasting.ui.screen.PlayerControlScreen
+import com.example.floatingscreencasting.ui.model.*
 import com.example.floatingscreencasting.ui.theme.FloatingScreenCastingTheme
 import com.example.floatingscreencasting.history.PlaybackHistoryManager
 import kotlinx.coroutines.launch
@@ -68,11 +68,11 @@ class ComposeMainActivity : AppCompatActivity() {
     }
 
     // DLNA服务
-    private lateinit var dlnaService: DlnaDmrService
+    private lateinit var dlnaService: DlnaRendererService
 
     // 音频输出控制器
     private lateinit var audioOutputController: AudioOutputController
-    private lateinit var dlnaDmcClient: DlnaDmcClient
+    private lateinit var dlnaDmcClient: DlnaControlPoint
     private lateinit var phoneDeviceManager: PhoneDeviceManager
     private lateinit var webSocketServer: com.example.floatingscreencasting.websocket.CarWebSocketServer
 
@@ -200,8 +200,9 @@ class ComposeMainActivity : AppCompatActivity() {
                 darkTheme = true,
                 modernDesign = true
             ) {
-                MainScreen(
+                PlayerControlScreen(
                     uiState = uiState.value,
+                    showScreenSettingsDialog = showScreenSettingsDialog,
                     onToggleWindow = { toggleFloatingWindow() },
                     onPlayPause = { togglePlayPause() },
                     onStop = { stop() },
@@ -223,6 +224,7 @@ class ComposeMainActivity : AppCompatActivity() {
                     onContinueWatching = { continueWatching() },
                     onAudioOutputChange = { toggleAudioOutput() },
                     onScanDevices = { scanPhoneDevices() },
+                    onRestartWebSocket = { restartWebSocketServer() },
                     onOpenSettingsPanel = { showScreenSettingsDialog = true },
                     onCloseSettingsPanel = { showScreenSettingsDialog = false }
                 )
@@ -249,116 +251,6 @@ class ComposeMainActivity : AppCompatActivity() {
             // 启动进度更新
             startProgressUpdate()
         }
-    }
-
-    @Composable
-    fun MainScreen(
-        uiState: MainUiState,
-        onToggleWindow: () -> Unit,
-        onPlayPause: () -> Unit,
-        onStop: () -> Unit,
-        onPrevious: () -> Unit,
-        onNext: () -> Unit,
-        onMute: () -> Unit,
-        onSeek: (Long) -> Unit,
-        onAspectRatioChange: (AspectRatio) -> Unit,
-        onPositionXChange: (Int) -> Unit,
-        onPositionYChange: (Int) -> Unit,
-        onSizeChange: (Int) -> Unit,
-        onHeightChange: (Int) -> Unit,
-        onAlphaChange: (Float) -> Unit,
-        onCenterClick: () -> Unit,
-        onMaximizeClick: () -> Unit,
-        onDefaultClick: () -> Unit,
-        onCustomClick: () -> Unit,
-        onDisplayChange: (Int) -> Unit,
-        onContinueWatching: () -> Unit,
-        onAudioOutputChange: () -> Unit = {},
-        onScanDevices: () -> Unit = {},
-        onOpenSettingsPanel: () -> Unit = {},
-        onCloseSettingsPanel: () -> Unit = {}
-    ) {
-        Scaffold(
-            topBar = {}  // 空的顶部栏
-        ) { paddingValues ->
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .padding(top = 70.dp, bottom = 16.dp)
-            ) {
-                // 左侧150dp留白区域（车机导航栏遮挡）
-                Spacer(modifier = Modifier.width(150.dp))
-
-                // 左侧操作区（400dp宽）
-                LeftOperationPanel(
-                    isPlaying = uiState.isPlaying,
-                    isMuted = uiState.isMuted,
-                    currentPosition = uiState.currentPosition,
-                    duration = uiState.duration,
-                    aspectRatio = uiState.aspectRatio,
-                    windowX = uiState.windowX,
-                    windowY = uiState.windowY,
-                    windowWidth = uiState.windowWidth,
-                    windowHeight = uiState.windowHeight,
-                    windowAlpha = uiState.windowAlpha,
-                    selectedDisplayId = uiState.selectedDisplayId,
-                    availableDisplays = uiState.availableDisplays,
-                    isFloatingWindowEnabled = uiState.isFloatingWindowEnabled,
-                    onPlayPause = onPlayPause,
-                    onStop = onStop,
-                    onPrevious = onPrevious,
-                    onNext = onNext,
-                    onMute = onMute,
-                    onAudioOutputChange = onAudioOutputChange,
-                    onToggleWindow = onToggleWindow,
-                    onCenterClick = onCenterClick,
-                    onMaximizeClick = onMaximizeClick,
-                    onDefaultClick = onDefaultClick,
-                    onCustomClick = onCustomClick,
-                    onDisplayChange = onDisplayChange,
-                    onOpenSettingsPanel = { showScreenSettingsDialog = true }
-                )
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                // 右侧状态显示区（仅显示状态概览和播放信息）
-                RightStatusPanel(
-                    isPlaying = uiState.isPlaying,
-                    currentPosition = uiState.currentPosition,
-                    duration = uiState.duration,
-                    castingStatus = uiState.castingStatus,
-                    isWindowVisible = uiState.isWindowVisible,
-                    audioOutputMode = uiState.audioOutputMode,
-                    phoneDeviceCount = uiState.phoneDeviceCount,
-                    videoTitle = uiState.currentVideoTitle,
-                    videoUrl = uiState.currentVideoUrl,
-                    isWebSocketServerRunning = uiState.isWebSocketServerRunning,  // 新增参数
-                    onSeek = onSeek,
-                    onRestartWebSocket = { restartWebSocketServer() },
-                    onScanDevices = onScanDevices,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        }
-
-        // 屏幕设置弹窗
-        ScreenSettingsDialog(
-            isVisible = showScreenSettingsDialog,
-            aspectRatio = uiState.aspectRatio,
-            windowX = uiState.windowX,
-            windowY = uiState.windowY,
-            windowWidth = uiState.windowWidth,
-            windowHeight = uiState.windowHeight,
-            windowAlpha = uiState.windowAlpha,
-            onAspectRatioChange = onAspectRatioChange,
-            onPositionXChange = onPositionXChange,
-            onPositionYChange = onPositionYChange,
-            onSizeChange = onSizeChange,
-            onHeightChange = onHeightChange,
-            onAlphaChange = onAlphaChange,
-            onDismiss = { showScreenSettingsDialog = false }
-        )
     }
 
     // ==================== 控制方法 ====================
@@ -994,7 +886,7 @@ class ComposeMainActivity : AppCompatActivity() {
 
         // 更新可用屏幕列表到UI状态
         val displayInfoList = allDisplays.map { display ->
-            com.example.floatingscreencasting.ui.composable.DisplayInfo(id = display.displayId, name = display.name)
+            DisplayInfo(id = display.displayId, name = display.name)
         }
         _uiState.value = uiState.value.copy(availableDisplays = displayInfoList)
 
@@ -1074,7 +966,7 @@ class ComposeMainActivity : AppCompatActivity() {
      */
     private fun initializeAudioOutputController() {
         // 初始化DLNA DMC客户端（用于发现和控制手机设备）
-        dlnaDmcClient = DlnaDmcClient(this)
+        dlnaDmcClient = DlnaControlPoint(this)
 
         // 初始化手机设备管理器
         phoneDeviceManager = PhoneDeviceManager(this)
@@ -1176,7 +1068,7 @@ class ComposeMainActivity : AppCompatActivity() {
     }
 
     private fun initializeDlnaService() {
-        dlnaService = DlnaDmrService.getInstance(this)
+        dlnaService = DlnaRendererService.getInstance(this)
 
         // 立即设置回调（不等待协程）
         dlnaService.apply {
@@ -1217,6 +1109,36 @@ class ComposeMainActivity : AppCompatActivity() {
                                 isPlaying = true,
                                 currentVideoUrl = uri,
                                 currentVideoTitle = title
+                            )
+                        }
+                    } catch (e: Exception) {
+                        Log.e("ComposeMainActivity", "播放视频失败", e)
+                    }
+                }
+            }
+
+            onPlayMediaWithMetadata = { uri, headers, title, durationMs ->
+                Log.d("ComposeMainActivity", "收到onPlayMediaWithMetadata回调")
+                Log.d("ComposeMainActivity", "URI: $uri")
+                Log.d("ComposeMainActivity", "标题: $title")
+                Log.d("ComposeMainActivity", "时长: ${durationMs}ms")
+                Log.d("ComposeMainActivity", "HTTP头: $headers")
+                // 保存视频URI到AudioOutputController，以便后续切换音频输出时使用
+                audioOutputController.setCurrentVideoUri(uri, headers)
+                lifecycleScope.launch(Dispatchers.Main) {
+                    try {
+                        Log.d("ComposeMainActivity", "videoPresentation是否为null: ${videoPresentation == null}")
+                        videoPresentation?.playMedia(uri, title, durationMs)
+                        if (uri.isNotEmpty()) {
+                            dlnaService.updateTransportState("PLAYING")
+                            // 使用metadata中的标题，如果没有则从URL提取
+                            val finalTitle = title.ifBlank { extractVideoTitle(uri) }
+                            // 播放开始，更新视频信息
+                            _uiState.value = uiState.value.copy(
+                                isPlaying = true,
+                                currentVideoUrl = uri,
+                                currentVideoTitle = finalTitle,
+                                duration = durationMs
                             )
                         }
                     } catch (e: Exception) {
@@ -1447,6 +1369,8 @@ class ComposeMainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // 🔧 修复内存泄漏：取消协程作用域
+        progressUpdateScope.coroutineContext[Job]?.cancel()
         stopProgressUpdate()
         displayManager.unregisterDisplayListener(displayListener)
         unregisterReceiver(playbackErrorReceiver)
@@ -1545,42 +1469,3 @@ class ComposeMainActivity : AppCompatActivity() {
         return address.joinToString(":") { String.format("%02X", it) }
     }
 }
-
-/**
- * 主界面UI状态
- */
-data class MainUiState(
-    val isWindowVisible: Boolean = false,
-    val castingStatus: String = "等待投屏",
-    val isPlaying: Boolean = false,
-    val currentPosition: Long = 0L,
-    val duration: Long = 0L,
-    val isMuted: Boolean = true,
-    val aspectRatio: AspectRatio = AspectRatio.RATIO_16_9,
-    val windowX: Int = 428,
-    val windowY: Int = 332,
-    val windowWidth: Int = 434,
-    val windowHeight: Int = 244,
-    val windowAlpha: Float = 0.41f,
-    val currentAudioOutput: String = "系统扬声器",
-    val selectedDisplayId: Int = 2,
-    val availableDisplays: List<DisplayInfo> = emptyList(),
-    val hasContinueWatching: Boolean = false,
-    val lastPlayedTitle: String = "",
-    val lastPlayedProgress: Int = 0,
-    val audioOutputMode: String = "speaker",
-    val connectedPhoneDevice: String? = null,
-    val phoneDeviceCount: Int = 0,
-
-    // 当前播放视频信息
-    val currentVideoTitle: String = "",
-    val currentVideoUrl: String = "",
-
-    // 悬浮窗启用状态
-    val isFloatingWindowEnabled: Boolean = true,
-
-    // WebSocket服务器运行状态
-    val isWebSocketServerRunning: Boolean = true
-)
-
-// DisplayInfo已定义在com.example.floatingscreencasting.ui.composable包中

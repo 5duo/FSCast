@@ -16,6 +16,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.floatingscreencasting.ui.theme.*
+import com.example.floatingscreencasting.ui.model.AspectRatio
+import com.example.floatingscreencasting.ui.model.DisplayInfo
 
 /**
  * 左侧操作区容器（400dp宽）

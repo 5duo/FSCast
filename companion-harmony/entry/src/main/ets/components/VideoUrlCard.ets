@@ -1,11 +1,12 @@
 /**
  * 视频URL显示卡片组件（优化版）
- * 使用 HarmonyOS SymbolGlyph 系统图标
+ * 使用兼容性图标组件
  */
 import { hilog } from '@kit.PerformanceAnalysisKit'
 import { pasteboard } from '@kit.BasicServicesKit'
 import { AppColors, AppSizes } from './StatusPanel'
 import { SysIcons } from '../constants/IconResources'
+import { TextIcon } from './IconCompat'
 
 const TAG = 'VideoUrlCard'
 const DOMAIN = 0x0000
@@ -32,10 +33,12 @@ export struct VideoUrlCard {
     Column() {
       // 标题行
       Row() {
-        // 标题图标 - 使用系统图标
-        SymbolGlyph($r(`sys.symbol.${SysIcons.LINK}`))
-          .fontSize(AppSizes.ICON_MD)
-          .fontColor([AppColors.PRIMARY])
+        // 标题图标 - 使用兼容性图标
+        TextIcon({
+          iconKey: 'LINK',
+          fontSize: AppSizes.ICON_MD,
+          fontColor: AppColors.PRIMARY
+        })
 
         // 标题文字
         Text('视频地址')
@@ -129,9 +132,11 @@ export struct VideoUrlCard {
             } else {
               Button() {
                 Row({ space: AppSizes.SPACING_SM }) {
-                  SymbolGlyph($r(`sys.symbol.${SysIcons.DOWNLOAD}`))
-                    .fontSize(AppSizes.ICON_MD)
-                    .fontColor(['#FFFFFF'])
+                  TextIcon({
+                    iconKey: 'DOWNLOAD',
+                    fontSize: AppSizes.ICON_MD,
+                    fontColor: '#FFFFFF'
+                  })
 
                   Text('下载')
                     .fontSize(14)

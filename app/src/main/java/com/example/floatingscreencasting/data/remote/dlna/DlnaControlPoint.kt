@@ -1,4 +1,4 @@
-package com.example.floatingscreencasting.dlna
+package com.example.floatingscreencasting.data.remote.dlna
 
 import android.content.Context
 import android.net.wifi.WifiManager
@@ -23,10 +23,10 @@ import java.util.concurrent.TimeUnit
  * DLNA DMC (数字媒体控制器) 客户端
  * 用于发现和控制DLNA DMR设备
  */
-class DlnaDmcClient(private val context: Context) {
+class DlnaControlPoint(private val context: Context) {
 
     companion object {
-        private const val TAG = "DlnaDmcClient"
+        private const val TAG = "DlnaControlPoint"
         private const val SSDP_ADDRESS = "239.255.255.250"
         private const val SSDP_PORT = 1900
         private const val DISCOVERY_TIMEOUT = 5000
@@ -74,7 +74,7 @@ class DlnaDmcClient(private val context: Context) {
      */
     fun start() {
         if (isRunning) {
-            Log.w(TAG, "DlnaDmcClient已经在运行")
+            Log.w(TAG, "DlnaControlPoint已经在运行")
             return
         }
 
@@ -89,7 +89,7 @@ class DlnaDmcClient(private val context: Context) {
 
             isRunning = true
 
-            Log.i(TAG, "DlnaDmcClient启动成功")
+            Log.i(TAG, "DlnaControlPoint启动成功")
 
             // 启动设备发现协程
             discoveryScope.launch {
@@ -105,7 +105,7 @@ class DlnaDmcClient(private val context: Context) {
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "启动DlnaDmcClient失败", e)
+            Log.e(TAG, "启动DlnaControlPoint失败", e)
             isRunning = false
             multicastLock?.release()
         }
@@ -459,7 +459,7 @@ USER-AGENT: FSCast/1.0 UPnP/1.1
      * 停止DLNA DMC客户端
      */
     fun stop() {
-        Log.i(TAG, "正在停止DlnaDmcClient...")
+        Log.i(TAG, "正在停止DlnaControlPoint...")
         isRunning = false
 
         discoverySocket?.close()
@@ -469,6 +469,10 @@ USER-AGENT: FSCast/1.0 UPnP/1.1
 
         discoveredDevices.clear()
 
-        Log.i(TAG, "DlnaDmcClient已停止")
+        Log.i(TAG, "DlnaControlPoint已停止")
     }
 }
+
+// 向后兼容的类型别名
+@Deprecated("使用 DlnaControlPoint 代替", ReplaceWith("DlnaControlPoint"))
+typealias DlnaDmcClient = DlnaControlPoint

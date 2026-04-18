@@ -1,4 +1,4 @@
-package com.example.floatingscreencasting.dlna
+package com.example.floatingscreencasting.data.remote.sync
 
 import android.util.Log
 import com.google.gson.Gson

@@ -8,16 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-
-/**
- * 屏幕比例枚举
- */
-enum class AspectRatio(val displayName: String, val width: Int, val height: Int) {
-    RATIO_16_9("16:9", 16, 9),
-    RATIO_4_3("4:3", 4, 3),
-    RATIO_PORTRAIT("竖屏", 9, 16),
-    CUSTOM("自定义", 0, 0)
-}
+import com.example.floatingscreencasting.ui.model.AspectRatio
 
 /**
  * 设置卡片

@@ -23,9 +23,9 @@ import androidx.media3.common.Player
 import com.example.floatingscreencasting.R
 import com.example.floatingscreencasting.databinding.ActivityMainBinding
 import com.example.floatingscreencasting.dlna.AudioOutputController
-import com.example.floatingscreencasting.dlna.DlnaDmcClient
-import com.example.floatingscreencasting.dlna.DlnaDmrService
 import com.example.floatingscreencasting.dlna.PhoneDeviceManager
+import com.example.floatingscreencasting.data.remote.dlna.DlnaControlPoint
+import com.example.floatingscreencasting.data.remote.dlna.DlnaRendererService
 import com.example.floatingscreencasting.events.MuteEvent
 import com.example.floatingscreencasting.presentation.VideoPresentation
 import kotlinx.coroutines.launch
@@ -53,11 +53,11 @@ class MainActivity : AppCompatActivity() {
     private val drivingDisplayId = 2
 
     // DLNA服务
-    private lateinit var dlnaService: DlnaDmrService
+    private lateinit var dlnaService: DlnaRendererService
 
     // 音频输出控制器
     private lateinit var audioOutputController: AudioOutputController
-    private lateinit var dlnaDmcClient: DlnaDmcClient
+    private lateinit var dlnaDmcClient: DlnaControlPoint
     private lateinit var phoneDeviceManager: PhoneDeviceManager
     private lateinit var webSocketServer: com.example.floatingscreencasting.websocket.CarWebSocketServer
 
@@ -702,7 +702,7 @@ class MainActivity : AppCompatActivity() {
         }.start()
 
         // 初始化DLNA DMC客户端（用于发现和控制手机设备）
-        dlnaDmcClient = DlnaDmcClient(this)
+        dlnaDmcClient = DlnaControlPoint(this)
 
         // 初始化手机设备管理器
         phoneDeviceManager = PhoneDeviceManager(this)
@@ -773,7 +773,7 @@ class MainActivity : AppCompatActivity() {
      * 初始化DLNA服务
      */
     private fun initializeDlnaService() {
-        dlnaService = DlnaDmrService.getInstance(this)
+        dlnaService = DlnaRendererService.getInstance(this)
 
         dlnaService.apply {
             onCastingStateChanged = { isCasting, title ->

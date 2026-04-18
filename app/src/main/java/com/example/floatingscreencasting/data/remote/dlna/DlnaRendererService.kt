@@ -1,9 +1,13 @@
-package com.example.floatingscreencasting.dlna
+package com.example.floatingscreencasting.data.remote.dlna
 
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.example.floatingscreencasting.data.remote.http.DlnaHttpServer
+import com.example.floatingscreencasting.data.remote.http.DlnaMediaMetadata
+import com.example.floatingscreencasting.data.remote.discovery.SsdpServer
+import com.example.floatingscreencasting.utils.UriUtils
 import kotlinx.coroutines.*
 
 /**
@@ -21,16 +25,16 @@ data class CastingRequest(
  * DLNA DMR服务
  * 管理SSDP和HTTP服务器，提供DLNA投屏功能
  */
-class DlnaDmrService(private val context: Context) {
+class DlnaRendererService(private val context: Context) {
 
     companion object {
-        private const val TAG = "DlnaDmrService"
+        private const val TAG = "DlnaRendererService"
         @Volatile
-        private var instance: DlnaDmrService? = null
+        private var instance: DlnaRendererService? = null
 
-        fun getInstance(context: Context): DlnaDmrService {
+        fun getInstance(context: Context): DlnaRendererService {
             return instance ?: synchronized(this) {
-                instance ?: DlnaDmrService(context.applicationContext).also { instance = it }
+                instance ?: DlnaRendererService(context.applicationContext).also { instance = it }
             }
         }
     }
@@ -115,6 +119,9 @@ class DlnaDmrService(private val context: Context) {
 
         Log.d(TAG, "正在停止DLNA服务...")
 
+        // 🔧 修复内存泄漏：取消serviceScope
+        serviceScope.cancel()
+
         ssdpServer.stop()
 
         try {
@@ -190,9 +197,9 @@ class DlnaDmrService(private val context: Context) {
      * 设置HTTP服务器回调
      */
     private fun setupHttpCallbacks() {
-        httpServer.setPlayCommand { uri, httpHeaders ->
+        httpServer.setPlayCommand { mediaMetadata ->
             serviceScope.launch {
-                handlePlayCommand(uri, httpHeaders)
+                handlePlayCommand(mediaMetadata)
             }
         }
 
@@ -232,8 +239,13 @@ class DlnaDmrService(private val context: Context) {
     /**
      * 处理播放命令
      */
-    private suspend fun handlePlayCommand(uri: String, httpHeaders: Map<String, String> = emptyMap()) {
+    private suspend fun handlePlayCommand(mediaMetadata: DlnaMediaMetadata) {
+        val uri = mediaMetadata.uri
+        val httpHeaders = mediaMetadata.httpHeaders
+
         Log.d(TAG, "处理播放命令: $uri")
+        Log.d(TAG, "视频标题: ${mediaMetadata.title}")
+        Log.d(TAG, "视频时长: ${mediaMetadata.durationMs}ms")
         Log.d(TAG, "HTTP头: $httpHeaders")
 
         if (uri.isBlank()) {
@@ -246,21 +258,24 @@ class DlnaDmrService(private val context: Context) {
         // 保存投屏请求（用于同步到手机端）
         currentCastingRequest = CastingRequest(
             uri = uri,
+            metadata = mediaMetadata.title.ifBlank { UriUtils.extractTitleFromUri(uri) },
             httpHeaders = httpHeaders
         )
         Log.d(TAG, "投屏请求已保存: $uri")
-
-        // 提取视频标题（从元数据或URL中）
-        val title = extractTitleFromUri(uri)
 
         try {
             // 检查onPlayMedia回调是否设置
             Log.d(TAG, "onPlayMedia回调是否为null: ${onPlayMedia == null}")
 
             // 通过EventBus或回调通知Presentation播放视频
-            onPlayMedia?.invoke(uri, httpHeaders)
+            // 传递标题和时长信息
+            onPlayMediaWithMetadata?.invoke(uri, httpHeaders, mediaMetadata.title, mediaMetadata.durationMs)
+                ?: onPlayMedia?.invoke(uri, httpHeaders)
+
             Log.d(TAG, "onPlayMedia回调已调用")
 
+            // 使用metadata中的标题，如果没有则从URL提取
+            val title = mediaMetadata.title.ifBlank { UriUtils.extractTitleFromUri(uri) }
             onCastingStateChanged?.invoke(true, title)
         } catch (e: Exception) {
             Log.e(TAG, "播放失败", e)
@@ -294,19 +309,6 @@ class DlnaDmrService(private val context: Context) {
     }
 
     /**
-     * 从URI中提取标题
-     */
-    private fun extractTitleFromUri(uri: String): String {
-        return when {
-            uri.contains("bilibili") -> "哔哩哔哩"
-            uri.contains("iqiyi") -> "爱奇艺"
-            uri.contains("v.qq.com") -> "腾讯视频"
-            uri.contains("youku") -> "优酷"
-            else -> "在线视频"
-        }
-    }
-
-    /**
      * 获取当前投屏请求
      * 用于同步到手机端
      */
@@ -321,6 +323,7 @@ class DlnaDmrService(private val context: Context) {
 
     // 媒体控制回调
     var onPlayMedia: ((String, Map<String, String>) -> Unit)? = null
+    var onPlayMediaWithMetadata: ((String, Map<String, String>, String, Long) -> Unit)? = null
     var onStopMedia: (() -> Unit)? = null
     var onPauseMedia: (() -> Unit)? = null
     var onPlay: (() -> Unit)? = null
@@ -328,3 +331,7 @@ class DlnaDmrService(private val context: Context) {
     var onGetDuration: (() -> Long)? = null
     var onGetPosition: (() -> Long)? = null
 }
+
+// 向后兼容的类型别名
+@Deprecated("使用 DlnaRendererService 代替", ReplaceWith("DlnaRendererService"))
+typealias DlnaDmrService = DlnaRendererService

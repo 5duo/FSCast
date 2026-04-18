@@ -1,4 +1,4 @@
-package com.example.floatingscreencasting.dlna
+package com.example.floatingscreencasting.data.remote.http
 
 import android.util.Log
 import fi.iki.elonen.NanoHTTPD
@@ -7,6 +7,16 @@ import org.xml.sax.InputSource
 import java.io.StringReader
 import java.net.InetAddress
 import javax.xml.parsers.DocumentBuilderFactory
+
+/**
+ * DLNA投屏视频元数据
+ */
+data class DlnaMediaMetadata(
+    val uri: String,
+    val title: String = "",
+    val durationMs: Long = 0,
+    val httpHeaders: Map<String, String> = emptyMap()
+)
 
 /**
  * DLNA HTTP服务器
@@ -53,7 +63,7 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
         }
     }
 
-    private var onPlayCommand: ((String, Map<String, String>) -> Unit)? = null
+    private var onPlayCommand: ((DlnaMediaMetadata) -> Unit)? = null
     private var onStopCommand: (() -> Unit)? = null
     private var onPauseCommand: (() -> Unit)? = null
     private var onSeekCommand: ((String) -> Unit)? = null
@@ -68,7 +78,7 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
     /**
      * 设置播放命令回调
      */
-    fun setPlayCommand(callback: (String, Map<String, String>) -> Unit) {
+    fun setPlayCommand(callback: (DlnaMediaMetadata) -> Unit) {
         onPlayCommand = callback
     }
 
@@ -216,7 +226,18 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                 Log.d(TAG, "原始URI: ${extractValue(body, "CurrentURI").take(100)}...")
                 Log.d(TAG, "反转义后URI: $uri")
                 Log.d(TAG, "URI长度: ${uri.length}")
-                Log.d(TAG, "Metadata前200字符: ${metadata.take(200)}")
+                Log.d(TAG, "Metadata: ${metadata.take(500)}")
+
+                // 解析metadata获取标题和时长
+                val (title, durationMs, metadataHeaders) = parseMetadata(metadata)
+
+                // 合并HTTP头（metadata中的HTTP头优先级更高）
+                val mergedHeaders = mutableMapOf<String, String>()
+                mergedHeaders.putAll(lastHttpHeaders)
+                mergedHeaders.putAll(metadataHeaders)
+
+                // 保存合并后的HTTP头
+                lastHttpHeaders = mergedHeaders
 
                 // 检测URL类型
                 val urlType = when {
@@ -240,9 +261,19 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                     Log.e(TAG, "这可能需要特殊的反爬虫处理")
                 }
 
+                // 创建元数据对象
+                val mediaMetadata = DlnaMediaMetadata(
+                    uri = uri,
+                    title = title,
+                    durationMs = durationMs,
+                    httpHeaders = mergedHeaders
+                )
+
+                Log.d(TAG, "解析结果 - 标题: $title, 时长: ${durationMs}ms (${formatTime(durationMs / 1000)})")
+
                 // 异步处理播放命令
                 CoroutineScope(Dispatchers.Main).launch {
-                    onPlayCommand?.invoke(uri, lastHttpHeaders)
+                    onPlayCommand?.invoke(mediaMetadata)
                 }
 
                 // 返回成功响应
@@ -262,8 +293,16 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                 Log.d(TAG, "收到Play命令")
                 transportState = "PLAYING"
 
+                // 创建空的元数据对象（恢复播放）
+                val emptyMetadata = DlnaMediaMetadata(
+                    uri = "",
+                    title = "",
+                    durationMs = 0,
+                    httpHeaders = lastHttpHeaders
+                )
+
                 CoroutineScope(Dispatchers.Main).launch {
-                    onPlayCommand?.invoke("", lastHttpHeaders)
+                    onPlayCommand?.invoke(emptyMetadata)
                 }
 
                 """
@@ -456,6 +495,136 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
         val pattern = "<(?:ns0:)?$tagName[^>]*>(.*?)</(?:ns0:)?$tagName>".toRegex()
         val match = pattern.find(xml)
         return match?.groupValues?.get(1)?.trim() ?: ""
+    }
+
+    /**
+     * 从DLNA metadata中提取视频信息
+     * @param metadataXml DIDL-Lite XML格式的metadata
+     * @return Triple(标题, 时长毫秒, HTTP头)
+     */
+    private fun parseMetadata(metadataXml: String): Triple<String, Long, Map<String, String>> {
+        var title = ""
+        var durationMs = 0L
+        val httpHeaders = mutableMapOf<String, String>()
+
+        if (metadataXml.isBlank()) {
+            Log.w(TAG, "⚠️ Metadata为空，无法解析标题和时长")
+            return Triple(title, durationMs, httpHeaders)
+        }
+
+        try {
+            Log.d(TAG, "========== 开始解析DLNA Metadata ==========")
+            Log.d(TAG, "原始Metadata内容:\n$metadataXml")
+
+            // **关键修复：HTML实体反转义**
+            // B站等客户端发送的metadata可能被HTML转义（&lt; &gt; &amp; &quot;）
+            // 必须先反转义才能正确解析XML
+            val decodedMetadata = metadataXml
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&amp;", "&")
+                .replace("&quot;", "\"")
+
+            Log.d(TAG, "反转义后Metadata内容:\n$decodedMetadata")
+            Log.d(TAG, "=========================================")
+
+            // 提取标题 (dc:title)
+            title = extractValue(decodedMetadata, "dc:title")
+                .ifBlank { extractValue(decodedMetadata, "title") }
+
+            // 提取时长 (res@duration 或 duration)
+            val durationStr = extractValue(decodedMetadata, "res")
+                .let { resValue ->
+                    // 从res属性中提取duration
+                    val durationPattern = """duration="([^"]+)"""".toRegex()
+                    durationPattern.find(resValue)?.groupValues?.get(1)
+                }
+                ?: extractValue(decodedMetadata, "duration")
+
+            if (durationStr.isNotBlank()) {
+                durationMs = parseDurationToMs(durationStr)
+            }
+
+            // 提取HTTP头（从res属性中）
+            val resElement = extractValue(decodedMetadata, "res")
+            if (resElement.isNotBlank()) {
+                // 提取protocolInfo
+                val protocolInfoPattern = """protocolInfo="([^"]+)"""".toRegex()
+                protocolInfoPattern.find(resElement)?.groupValues?.get(1)?.let { protocolInfo ->
+                    // 解析protocolInfo: "http-get:*:video/mp4:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000"
+                    val parts = protocolInfo.split(":")
+                    if (parts.size >= 4) {
+                        httpHeaders["Content-Type"] = parts[2]
+                    }
+                }
+            }
+
+            Log.d(TAG, "Metadata解析结果:")
+            Log.d(TAG, "  标题: $title")
+            Log.d(TAG, "  时长: ${durationMs}ms (${formatTime(durationMs / 1000)})")
+            Log.d(TAG, "  HTTP头: ${httpHeaders.keys}")
+
+            // 如果没有获取到标题或时长，记录警告
+            if (title.isBlank() || durationMs == 0L) {
+                Log.w(TAG, "⚠️ Metadata中缺少标题或时长信息")
+                Log.w(TAG, "  标题为空: ${title.isBlank()}")
+                Log.w(TAG, "  时长为0: ${durationMs == 0L}")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "解析metadata失败", e)
+        }
+
+        return Triple(title, durationMs, httpHeaders)
+    }
+
+    /**
+     * 解析时长字符串为毫秒
+     * 支持格式：
+     * - HH:MM:SS (如 "1:23:45")
+     * - MM:SS (如 "83:45")
+     * - 纯秒数 (如 "5025")
+     * - H:MM:SS.mmm (如 "1:23:45.123")
+     */
+    private fun parseDurationToMs(durationStr: String): Long {
+        return try {
+            when {
+                durationStr.contains(":") && durationStr.split(":").size == 3 -> {
+                    // HH:MM:SS 或 HH:MM:SS.mmm
+                    val parts = durationStr.split(":")
+                    val hours = parts[0].toFloat()
+                    val minutes = parts[1].toFloat()
+                    val secondsAndMs = parts[2].split(".")
+                    val seconds = secondsAndMs[0].toFloat()
+                    val ms = if (secondsAndMs.size > 1) {
+                        ("0.${secondsAndMs[1]}").toFloat() * 1000
+                    } else {
+                        0f
+                    }
+                    ((hours * 3600 + minutes * 60 + seconds) * 1000 + ms).toLong()
+                }
+                durationStr.contains(":") && durationStr.split(":").size == 2 -> {
+                    // MM:SS
+                    val parts = durationStr.split(":")
+                    val minutes = parts[0].toFloat()
+                    val seconds = parts[1].toFloat()
+                    ((minutes * 60 + seconds) * 1000).toLong()
+                }
+                else -> {
+                    // 纯秒数或毫秒数
+                    val value = durationStr.toFloat()
+                    if (value > 100000) {
+                        // 可能是毫秒
+                        value.toLong()
+                    } else {
+                        // 秒
+                        (value * 1000).toLong()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "解析时长失败: $durationStr", e)
+            0L
+        }
     }
 
     /**

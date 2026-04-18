@@ -20,6 +20,7 @@ import com.example.floatingscreencasting.R
 import com.example.floatingscreencasting.cache.VideoCacheManager
 import com.example.floatingscreencasting.databinding.PresentationVideoBinding
 import com.example.floatingscreencasting.history.PlaybackHistoryManager
+import com.example.floatingscreencasting.utils.UriUtils
 
 /**
  * 单屏幕视频播放Dialog
@@ -139,15 +140,18 @@ class SingleScreenVideoDialog(
         currentUri = uri
 
         // 保存播放记录
-        val title = extractTitleFromUri(uri)
+        val title = UriUtils.extractTitleFromUri(uri)
         historyManager.savePlayback(uri, title, 0, 0)
 
         // 使用视频缓存管理器创建缓存数据源
         val cacheManager = VideoCacheManager.getInstance(context)
-        val headers = mapOf(
-            "User-Agent" to "Mozilla/5.0 (Linux; Android 12) FSCast/1.0",
-            "Referer" to extractRefererFromUri(uri)
+        val referer = UriUtils.extractRefererFromUri(uri)
+        val headers = mutableMapOf(
+            "User-Agent" to "Mozilla/5.0 (Linux; Android 12) FSCast/1.0"
         )
+        if (referer.isNotEmpty()) {
+            headers["Referer"] to referer
+        }
         val cachedDataSourceFactory = cacheManager.createCachedDataSourceFactory(context, headers)
         val mediaSourceFactory = DefaultMediaSourceFactory(cachedDataSourceFactory)
 
@@ -175,29 +179,6 @@ class SingleScreenVideoDialog(
         }
 
         exoPlayer?.play()
-    }
-
-    /**
-     * 从URI提取标题
-     */
-    private fun extractTitleFromUri(uri: String): String {
-        return try {
-            val segments = uri.split("/")
-            segments.last().substring(0, 50)
-        } catch (e: Exception) {
-            "未知视频"
-        }
-    }
-
-    /**
-     * 从URI提取Referer
-     */
-    private fun extractRefererFromUri(uri: String): String {
-        return when {
-            uri.contains("bilibili.com") || uri.contains("bilibili") -> "https://www.bilibili.com"
-            uri.contains("acgvideo.com") -> "https://www.acgvideo.com"
-            else -> ""
-        }
     }
 
     /**

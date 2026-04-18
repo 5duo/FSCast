@@ -403,9 +403,9 @@ private fun SectionCard(
 
 /**
  * 格式化时间显示
+ * @param seconds 时间（秒）
  */
-private fun formatDuration(milliseconds: Long): String {
-    val seconds = milliseconds / 1000
+private fun formatDuration(seconds: Long): String {
     val minutes = seconds / 60
     val remainingSeconds = seconds % 60
     return String.format("%d:%02d", minutes, remainingSeconds)

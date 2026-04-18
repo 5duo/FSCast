@@ -14,16 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.floatingscreencasting.ui.theme.*
-
-/**
- * 屏幕信息数据类
- */
-data class DisplayInfo(
-    val id: Int,
-    val name: String
-) {
-    override fun toString(): String = "$name (ID: $id)"
-}
+import com.example.floatingscreencasting.ui.model.DisplayInfo
 
 /**
  * 投屏状态卡片

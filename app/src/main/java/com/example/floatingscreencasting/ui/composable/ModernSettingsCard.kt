@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.floatingscreencasting.ui.theme.*
+import com.example.floatingscreencasting.ui.model.AspectRatio
 
 /**
  * 现代化设置卡片

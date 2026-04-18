@@ -1,9 +1,10 @@
 /**
  * 状态面板组件（优化版）
- * 使用 HarmonyOS SymbolGlyph 系统图标
+ * 使用兼容性图标组件
  */
 import { hilog } from '@kit.PerformanceAnalysisKit'
 import { SysIcons } from '../constants/IconResources'
+import { TextIcon } from './IconCompat'
 
 const TAG = 'StatusPanel'
 const DOMAIN = 0x0000
@@ -122,11 +123,13 @@ export struct StatusPanel {
 
       // 右侧：刷新按钮和展开图标
       Row({ space: AppSizes.SPACING_SM }) {
-        // 刷新按钮 - 使用系统图标
+        // 刷新按钮 - 使用兼容性图标
         Button() {
-          SymbolGlyph($r(`sys.symbol.${SysIcons.REFRESH}`))
-            .fontSize(AppSizes.ICON_MD)
-            .fontColor([AppColors.TEXT_SECONDARY])
+          TextIcon({
+            iconKey: 'REFRESH',
+            fontSize: AppSizes.ICON_MD,
+            fontColor: AppColors.TEXT_SECONDARY
+          })
         }
         .width(36)
         .height(36)
@@ -139,11 +142,13 @@ export struct StatusPanel {
         })
         .stateEffect(true)
 
-        // 展开/收起按钮 - 使用系统图标
+        // 展开/收起按钮 - 使用兼容性图标
         Button() {
-          SymbolGlyph($r(`sys.symbol.${this.isExpanded ? SysIcons.COLLAPSE : SysIcons.EXPAND}`))
-            .fontSize(12)
-            .fontColor([AppColors.TEXT_SECONDARY])
+          TextIcon({
+            iconKey: this.isExpanded ? 'COLLAPSE' : 'EXPAND',
+            fontSize: 18,
+            fontColor: AppColors.TEXT_SECONDARY
+          })
         }
         .width(36)
         .height(36)
@@ -319,15 +324,16 @@ export struct StatusPanel {
   }
 
   /**
-   * 状态项（带系统图标）
+   * 状态项（带图标）
    */
   @Builder StatusItemWithIcon(iconName: string, label: string, value: string, valueColor: string) {
     Row() {
-      // 系统图标
-      SymbolGlyph($r(`sys.symbol.${iconName}`))
-        .fontSize(14)
-        .fontColor([valueColor])
-        .fontWeight(FontWeight.Medium)
+      // 兼容性图标
+      TextIcon({
+        iconKey: iconName,
+        fontSize: 14,
+        fontColor: valueColor
+      })
 
       // 标签
       Text(label)

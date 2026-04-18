@@ -45,6 +45,8 @@ export class CarWebSocketClient {
   private carServerUrl: string = ''
   private isConnected: boolean = false
   private reconnectTimer: number = -1
+  // 🔧 修复内存泄漏：添加重连定时器ID
+  private reconnectTimeoutId: number = -1
 
   // 播放回调
   private onPlayCommandCallback: ((uri: string, httpHeaders: Record<string, string>) => void) | null = null
@@ -444,7 +446,8 @@ export class CarWebSocketClient {
    */
   private scheduleReconnect(): void {
     // 5秒后重连
-    setTimeout(() => {
+    // 🔧 修复内存泄漏：保存定时器ID以便清理
+    this.reconnectTimeoutId = setTimeout(() => {
       if (!this.isConnected && this.carServerUrl) {
         const ip: string = this.carServerUrl.replace('ws://', '').split(':')[0]
         hilog.info(DOMAIN, TAG, '尝试重新连接到车机端')
@@ -461,6 +464,12 @@ export class CarWebSocketClient {
 
     this.isConnected = false
     this.stopHeartbeat()
+
+    // 🔧 修复内存泄漏：清理重连定时器
+    if (this.reconnectTimeoutId !== -1) {
+      clearTimeout(this.reconnectTimeoutId)
+      this.reconnectTimeoutId = -1
+    }
 
     if (this.ws) {
       try {

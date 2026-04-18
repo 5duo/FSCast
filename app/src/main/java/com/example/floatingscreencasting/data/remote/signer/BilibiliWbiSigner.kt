@@ -1,4 +1,4 @@
-package com.example.floatingscreencasting.dlna
+package com.example.floatingscreencasting.data.remote.signer
 
 import android.util.Log
 import kotlinx.coroutines.Dispatchers

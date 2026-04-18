@@ -14,7 +14,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.example.floatingscreencasting.dlna.DlnaDmcClient.DlnaDevice
+import com.example.floatingscreencasting.data.remote.dlna.DlnaControlPoint.DlnaDevice
 
 /**
  * 设备配对弹窗

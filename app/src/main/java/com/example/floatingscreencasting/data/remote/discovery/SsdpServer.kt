@@ -1,4 +1,4 @@
-package com.example.floatingscreencasting.dlna
+package com.example.floatingscreencasting.data.remote.discovery
 
 import android.content.Context
 import android.net.wifi.WifiManager

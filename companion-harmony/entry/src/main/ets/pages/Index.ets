@@ -469,9 +469,10 @@ struct Index {
   aboutToDisappear(): void {
     hilog.info(DOMAIN, TAG, 'Page aboutToDisappear')
 
-    // 清理状态检查定时器
+    // 🔧 修复内存泄漏：清理状态检查定时器并重置
     if (this.statusCheckTimer !== -1) {
       clearInterval(this.statusCheckTimer)
+      this.statusCheckTimer = -1
     }
 
     this.cleanup()

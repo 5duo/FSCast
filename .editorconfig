@@ -1,0 +1,59 @@
+root = true
+
+# 全局设置
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Kotlin/Kotlin Script
+[*.{kt,kts}]
+indent_style = space
+indent_size = 4
+continuation_indent_size = 4
+max_line_length = 120
+
+# Java
+[*.java]
+indent_style = space
+indent_size = 4
+max_line_length = 120
+
+# XML
+[*.{xml,json}]
+indent_style = space
+indent_size = 4
+
+# Groovy
+[*.gradle]
+indent_style = space
+indent_size = 4
+
+# HarmonyOS ArkTS
+[*.{ets,json5}]
+indent_style = space
+indent_size = 2
+
+# Markdown
+[*.md]
+trim_trailing_whitespace = false
+max_line_length = off
+
+# Shell脚本
+[*.sh]
+end_of_line = lf
+
+# Windows批处理
+[*.{bat,cmd}]
+end_of_line = crlf
+
+# YAML
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# Properties文件
+[*.properties]
+indent_style = space
+indent_size = 2

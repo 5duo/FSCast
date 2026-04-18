@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.floatingscreencasting.ui.theme.*
+import com.example.floatingscreencasting.ui.model.AspectRatio
 
 /**
  * 屏幕设置弹窗

@@ -1,7 +1,8 @@
 package com.example.floatingscreencasting.dlna
 
 import android.util.Log
-import com.example.floatingscreencasting.dlna.DlnaDmcClient.DlnaDevice
+import com.example.floatingscreencasting.data.remote.dlna.DlnaControlPoint
+import com.example.floatingscreencasting.data.remote.dlna.DlnaControlPoint.DlnaDevice
 import com.example.floatingscreencasting.websocket.CarWebSocketServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,7 +17,7 @@ import kotlinx.coroutines.withContext
  * 协调车机和手机端的播放状态
  */
 class AudioOutputController(
-    private val dlnaDmcClient: DlnaDmcClient,
+    private val dlnaDmcClient: DlnaControlPoint,
     private val phoneDeviceManager: PhoneDeviceManager,
     private val webSocketServer: CarWebSocketServer? = null
 ) {

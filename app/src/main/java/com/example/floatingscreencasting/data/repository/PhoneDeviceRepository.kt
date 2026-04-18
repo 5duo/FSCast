@@ -1,4 +1,4 @@
-package com.example.floatingscreencasting.dlna
+package com.example.floatingscreencasting.data.repository
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -9,10 +9,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * 手机设备管理器
+ * 手机设备仓库
  * 管理已发现的DLNA设备（主要是手机端FSCast Remote）
  */
-class PhoneDeviceManager(context: Context) {
+class PhoneDeviceRepository(context: Context) {
 
     companion object {
         private const val TAG = "PhoneDeviceManager"
@@ -155,3 +155,7 @@ class PhoneDeviceManager(context: Context) {
         selectDevice(knownDevice)
     }
 }
+
+// 向后兼容的类型别名
+@Deprecated("使用 PhoneDeviceRepository 代替", ReplaceWith("PhoneDeviceRepository"))
+typealias PhoneDeviceManager = PhoneDeviceRepository

@@ -1,10 +1,11 @@
 /**
  * 底部控制面板组件（优化版）
- * 使用 HarmonyOS SymbolGlyph 系统图标
+ * 使用兼容性图标组件
  */
 import { hilog } from '@kit.PerformanceAnalysisKit'
 import { AppColors, AppSizes } from './StatusPanel'
 import { SysIcons } from '../constants/IconResources'
+import { TextIcon } from './IconCompat'
 
 const TAG = 'ControlPanel'
 const DOMAIN = 0x0000
@@ -93,10 +94,12 @@ export struct ControlPanel {
         // IP设置按钮
         Button() {
           Row({ space: AppSizes.SPACING_SM }) {
-            // 设置图标 - 使用系统图标
-            SymbolGlyph($r(`sys.symbol.${SysIcons.SETTINGS}`))
-              .fontSize(AppSizes.ICON_MD)
-              .fontColor([AppColors.TEXT_SECONDARY])
+            // 设置图标 - 使用兼容性图标
+            TextIcon({
+              iconKey: 'SETTINGS',
+              fontSize: AppSizes.ICON_MD,
+              fontColor: AppColors.TEXT_SECONDARY
+            })
 
             // 按钮文字
             Text('设置车机IP')
