@@ -57,19 +57,19 @@ fun ModernSettingsCard(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 ModernQuickAction(
-                    icon = "🔄",
+                    imageVector = MaterialIconsRes.REFRESH,
                     label = "默认",
                     onClick = onDefaultClick,
                     modifier = Modifier.weight(1f)
                 )
                 ModernQuickAction(
-                    icon = "📐",
+                    imageVector = MaterialIconsRes.FULL_SCREEN,
                     label = "最大化",
                     onClick = onMaximizeClick,
                     modifier = Modifier.weight(1f)
                 )
                 ModernQuickAction(
-                    icon = "💾",
+                    imageVector = MaterialIconsRes.SAVE,
                     label = "自定义",
                     onClick = onCustomClick,
                     modifier = Modifier.weight(1f)
@@ -108,7 +108,7 @@ fun ModernSettingsCard(
             if (aspectRatio == AspectRatio.CUSTOM) {
                 // 自定义比例：显示宽度和高度两个滑块
                 ModernSliderRow(
-                    icon = "↔️",
+                    imageVector = MaterialIconsRes.ALIGN_HORIZONTAL,
                     label = "窗口宽度",
                     value = windowWidth,
                     valueRange = 240..1920,
@@ -120,7 +120,7 @@ fun ModernSettingsCard(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 ModernSliderRow(
-                    icon = "↕️",
+                    imageVector = MaterialIconsRes.ALIGN_VERTICAL,
                     label = "窗口高度",
                     value = windowHeight,
                     valueRange = 135..1080,
@@ -133,7 +133,7 @@ fun ModernSettingsCard(
             } else {
                 // 预设比例：只显示宽度滑块
                 ModernSliderRow(
-                    icon = "📏",
+                    imageVector = MaterialIconsRes.RESIZE,
                     label = "窗口大小",
                     value = windowWidth,
                     valueRange = 240..1920,
@@ -147,7 +147,7 @@ fun ModernSettingsCard(
 
             // 位置 X
             ModernSliderRow(
-                icon = "↔️",
+                imageVector = MaterialIconsRes.ALIGN_HORIZONTAL,
                 label = "水平位置",
                 value = windowX,
                 valueRange = 0..1920,
@@ -160,7 +160,7 @@ fun ModernSettingsCard(
 
             // 位置 Y
             ModernSliderRow(
-                icon = "↕️",
+                imageVector = MaterialIconsRes.ALIGN_VERTICAL,
                 label = "垂直位置",
                 value = windowY,
                 valueRange = 0..720,
@@ -173,7 +173,7 @@ fun ModernSettingsCard(
 
             // 透明度
             ModernSliderRow(
-                icon = "🔆",
+                imageVector = MaterialIconsRes.VISIBILITY,
                 label = "透明度",
                 value = (windowAlpha * 100).toInt(),
                 valueRange = 10..100,
@@ -186,11 +186,11 @@ fun ModernSettingsCard(
 }
 
 /**
- * 快捷操作按钮
+ * 快捷操作按钮（使用Material Icons）
  */
 @Composable
 private fun ModernQuickAction(
-    icon: String,
+    imageVector: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -209,9 +209,11 @@ private fun ModernQuickAction(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text(
-                text = icon,
-                style = MaterialTheme.typography.titleMedium
+            MaterialIcon(
+                imageVector = imageVector,
+                contentDescription = label,
+                iconSize = 24.dp,
+                tint = OnSurface
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(

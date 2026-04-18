@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+IconPark SVG图标模板
+
+使用说明：
+1. 从 https://iconpark.oceanengine.com/ 下载SVG图标
+2. 复制SVG内容到<path>标签中
+3. 将viewportWidth和viewportHeight设置为图标实际尺寸
+4. 重要：不要添加fill属性，以支持动态着色
+
+示例：
+原图标SVG（不要复制fill）：
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <path fill="#333" d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S960 759.4 960 512 759.4 64 558.4 64 512 64z"/>
+</svg>
+
+处理后（移除fill）：
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path
+        android:fillColor="@color/goldOnSurface"
+        android:pathData="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S960 759.4 960 512 759.4 64 558.4 64 512 64z"/>
+</vector>
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="#E8E8E8">
+    <!-- 在这里粘贴IconPark SVG的path数据 -->
+    <!-- 示例：Display图标 -->
+    <!-- <path android:pathData="..."/> -->
+</vector>

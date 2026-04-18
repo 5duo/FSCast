@@ -1,12 +1,11 @@
 /**
- * 视频URL显示卡片组件
- * 显示当前接收到的视频URL，支持复制和下载
+ * 视频URL显示卡片组件（优化版）
+ * 使用 HarmonyOS SymbolGlyph 系统图标
  */
 import { hilog } from '@kit.PerformanceAnalysisKit'
-import { http } from '@kit.NetworkKit'
-import { fileIo } from '@kit.CoreFileKit'
-import { BusinessError } from '@kit.BasicServicesKit'
 import { pasteboard } from '@kit.BasicServicesKit'
+import { AppColors, AppSizes } from './StatusPanel'
+import { SysIcons } from '../constants/IconResources'
 
 const TAG = 'VideoUrlCard'
 const DOMAIN = 0x0000
@@ -31,12 +30,19 @@ export struct VideoUrlCard {
 
   build() {
     Column() {
-      // 标题
+      // 标题行
       Row() {
+        // 标题图标 - 使用系统图标
+        SymbolGlyph($r(`sys.symbol.${SysIcons.LINK}`))
+          .fontSize(AppSizes.ICON_MD)
+          .fontColor([AppColors.PRIMARY])
+
+        // 标题文字
         Text('视频地址')
           .fontSize(16)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#F1F5F9')
+          .fontColor(AppColors.TEXT_PRIMARY)
+          .margin({ left: AppSizes.SPACING_XS })
 
         Blank()
 
@@ -46,15 +52,16 @@ export struct VideoUrlCard {
             Circle()
               .width(8)
               .height(8)
-              .fill('#10B981')
+              .fill(AppColors.SUCCESS)
+
             Text('已接收')
               .fontSize(12)
-              .fontColor('#10B981')
+              .fontColor(AppColors.SUCCESS)
           }
         }
       }
       .width('100%')
-      .margin({ bottom: 12 })
+      .margin({ bottom: AppSizes.SPACING_MD })
 
       // URL显示区域
       Column() {
@@ -62,97 +69,114 @@ export struct VideoUrlCard {
           // 显示URL
           Text(this.formatUrlForDisplay(this.dlnaUri))
             .fontSize(12)
-            .fontColor('#94A3B8')
+            .fontColor(AppColors.TEXT_SECONDARY)
             .width('100%')
             .maxLines(3)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .margin({ bottom: 12 })
+            .margin({ bottom: AppSizes.SPACING_MD })
 
           // 按钮区域
-          Row({ space: 12 }) {
+          Row({ space: AppSizes.SPACING_MD }) {
             // 复制按钮
             Button() {
-              Row({ space: 8 }) {
-                Text('📋')
-                  .fontSize(16)
+              Row({ space: AppSizes.SPACING_SM }) {
+                Text('□')
+                  .fontSize(AppSizes.ICON_MD)
+                  .fontColor(AppColors.TEXT_PRIMARY)
+
                 Text('复制')
                   .fontSize(14)
-                  .fontColor('#F1F5F9')
+                  .fontColor(AppColors.TEXT_PRIMARY)
               }
             }
             .type(ButtonType.Normal)
-            .backgroundColor('#334155')
-            .borderRadius(8)
+            .backgroundColor(AppColors.BG_ELEMENT)
+            .borderRadius(AppSizes.RADIUS_MD)
             .height(40)
-            .padding({ left: 16, right: 16 })
+            .padding({
+              left: AppSizes.SPACING_MD,
+              right: AppSizes.SPACING_MD
+            })
             .onClick(() => {
               this.copyUrl()
             })
+            .stateEffect(true)
 
             Blank()
 
             // 下载按钮
             if (this.isDownloading) {
               // 下载中状态
-              Row({ space: 8 }) {
+              Row({ space: AppSizes.SPACING_SM }) {
                 LoadingProgress()
                   .width(16)
                   .height(16)
-                  .color('#6366F1')
+                  .color(AppColors.PRIMARY)
+
                 Text(`${this.downloadProgress}%`)
                   .fontSize(13)
-                  .fontColor('#6366F1')
+                  .fontColor(AppColors.PRIMARY)
               }
               .width(100)
               .height(40)
-              .padding({ left: 16, right: 16 })
-              .backgroundColor('#0F172A')
-              .borderRadius(8)
+              .padding({
+                left: AppSizes.SPACING_MD,
+                right: AppSizes.SPACING_MD
+              })
+              .backgroundColor(AppColors.BG_PRIMARY)
+              .borderRadius(AppSizes.RADIUS_MD)
               .justifyContent(FlexAlign.Center)
             } else {
               Button() {
-                Row({ space: 8 }) {
-                  Text('⬇️')
-                    .fontSize(16)
+                Row({ space: AppSizes.SPACING_SM }) {
+                  SymbolGlyph($r(`sys.symbol.${SysIcons.DOWNLOAD}`))
+                    .fontSize(AppSizes.ICON_MD)
+                    .fontColor(['#FFFFFF'])
+
                   Text('下载')
                     .fontSize(14)
-                    .fontColor('#F1F5F9')
+                    .fontColor('#FFFFFF')
                 }
               }
               .type(ButtonType.Normal)
-              .backgroundColor('#6366F1')
-              .borderRadius(8)
+              .backgroundColor(AppColors.PRIMARY)
+              .borderRadius(AppSizes.RADIUS_MD)
               .height(40)
-              .padding({ left: 16, right: 16 })
+              .padding({
+                left: AppSizes.SPACING_MD,
+                right: AppSizes.SPACING_MD
+              })
               .onClick(() => {
                 this.downloadVideo()
               })
+              .stateEffect(true)
             }
           }
           .width('100%')
         } else {
           // 等待接收状态
-          Row({ space: 12 }) {
+          Row({ space: AppSizes.SPACING_SM }) {
             Circle()
               .width(8)
               .height(8)
-              .fill('#64748B')
+              .fill(AppColors.TEXT_DISABLED)
+
             Text('等待接收视频地址...')
               .fontSize(13)
-              .fontColor('#64748B')
+              .fontColor(AppColors.TEXT_DISABLED)
           }
           .width('100%')
-          .padding(12)
-          .backgroundColor('#0F172A')
-          .borderRadius(8)
+          .padding(AppSizes.SPACING_MD)
+          .backgroundColor(AppColors.BG_PRIMARY)
+          .borderRadius(AppSizes.RADIUS_MD)
         }
       }
       .width('100%')
     }
     .width('100%')
-    .padding(16)
-    .backgroundColor('#1E293B')
-    .borderRadius(16)
+    .padding(AppSizes.SPACING_LG)
+    .backgroundColor(AppColors.BG_CARD)
+    .borderRadius(AppSizes.RADIUS_LG)
   }
 
   /**
@@ -183,7 +207,7 @@ export struct VideoUrlCard {
   }
 
   /**
-   * 下载视频
+   * 下载视频（触发回调）
    */
   private async downloadVideo(): Promise<void> {
     if (this.dlnaUri.length === 0 || this.isDownloading) {

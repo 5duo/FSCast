@@ -1,8 +1,10 @@
 /**
- * 视频播放器卡片组件
- * 统一的视频播放器，支持HTTP头传递和进度同步
+ * 视频播放器卡片组件（优化版）
+ * 使用 HarmonyOS SymbolGlyph 系统图标
  */
 import { hilog } from '@kit.PerformanceAnalysisKit'
+import { AppColors, AppSizes } from './StatusPanel'
+import { SysIcons } from '../constants/IconResources'
 
 const TAG = 'VideoPlayerCard'
 const DOMAIN = 0x0000
@@ -34,7 +36,7 @@ export struct VideoPlayerCard {
         Text('视频播放')
           .fontSize(18)
           .fontWeight(FontWeight.Bold)
-          .fontColor('#F1F5F9')
+          .fontColor(AppColors.TEXT_PRIMARY)
 
         Blank()
 
@@ -43,14 +45,15 @@ export struct VideoPlayerCard {
           Circle()
             .width(8)
             .height(8)
-            .fill(this.dlnaIsPlaying ? '#10B981' : '#64748B')
+            .fill(this.dlnaIsPlaying ? AppColors.SUCCESS : AppColors.NEUTRAL)
+
           Text(this.dlnaIsPlaying ? '播放中' : '已暂停')
             .fontSize(12)
-            .fontColor(this.dlnaIsPlaying ? '#10B981' : '#64748B')
+            .fontColor(this.dlnaIsPlaying ? AppColors.SUCCESS : AppColors.NEUTRAL)
         }
       }
       .width('100%')
-      .margin({ bottom: 12 })
+      .margin({ bottom: AppSizes.SPACING_MD })
 
       // 视频播放器
       if (this.dlnaUri.length > 0) {
@@ -61,7 +64,7 @@ export struct VideoPlayerCard {
           .width('100%')
           .aspectRatio(16 / 9)
           .backgroundColor('#000000')
-          .borderRadius(12)
+          .borderRadius(AppSizes.RADIUS_MD)
           .autoPlay(true)
           .controls(true)
           .loop(false)
@@ -80,20 +83,9 @@ export struct VideoPlayerCard {
             this.onPlayStateChange?.(false)
             this.onCompletion?.()
           })
-          .onError((error) => {
+          .onError((error: ESObject) => {
             hilog.error(DOMAIN, TAG, `视频播放错误: ${JSON.stringify(error)}`)
             this.onError?.(error)
-          })
-          .onPrepared((info: PreparedInfo) => {
-            hilog.info(DOMAIN, TAG, `视频准备完成，时长: ${info.duration}ms`)
-            this.onProgressUpdate?.(0, info.duration)
-          })
-          .onSeeking((time) => {
-            hilog.debug(DOMAIN, TAG, `视频跳转到: ${time}ms`)
-          })
-          .onSeeked((info: PlaybackInfo) => {
-            hilog.debug(DOMAIN, TAG, `视频跳转完成: ${info.time}ms`)
-            this.onProgressUpdate?.(info.time, this.dlnaDuration)
           })
           .onUpdate((info: PlaybackInfo) => {
             // 更新播放进度
@@ -102,18 +94,21 @@ export struct VideoPlayerCard {
       } else {
         // 等待URL占位符
         Column() {
-          Text('⏸')
+          // 暂停图标 - 使用系统图标
+          SymbolGlyph($r(`sys.symbol.${SysIcons.PAUSE}`))
             .fontSize(48)
-            .fontColor('#64748B')
-            .margin({ bottom: 12 })
-          Text('等待DLNA投屏...')
+            .fontColor([AppColors.TEXT_DISABLED])
+            .margin({ bottom: AppSizes.SPACING_MD })
+
+          // 提示文字
+          Text('等待投屏...')
             .fontSize(14)
-            .fontColor('#94A3B8')
+            .fontColor(AppColors.TEXT_SECONDARY)
         }
         .width('100%')
         .aspectRatio(16 / 9)
-        .backgroundColor('#0F172A')
-        .borderRadius(12)
+        .backgroundColor(AppColors.BG_PRIMARY)
+        .borderRadius(AppSizes.RADIUS_MD)
         .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
       }
@@ -123,24 +118,26 @@ export struct VideoPlayerCard {
         Row() {
           Text(this.formatTime(this.dlnaPosition))
             .fontSize(12)
-            .fontColor('#94A3B8')
+            .fontColor(AppColors.TEXT_SECONDARY)
+
           Blank()
+
           Text(this.formatTime(this.dlnaDuration))
             .fontSize(12)
-            .fontColor('#94A3B8')
+            .fontColor(AppColors.TEXT_SECONDARY)
         }
         .width('100%')
-        .margin({ top: 8 })
+        .margin({ top: AppSizes.SPACING_SM })
       }
     }
     .width('100%')
-    .padding(16)
-    .backgroundColor('#1E293B')
-    .borderRadius(16)
+    .padding(AppSizes.SPACING_LG)
+    .backgroundColor(AppColors.BG_CARD)
+    .borderRadius(AppSizes.RADIUS_LG)
   }
 
   /**
-   * 格式化时间
+   * 格式化时间（毫秒 -> 分:秒）
    */
   private formatTime(ms: number): string {
     let totalSeconds = Math.max(0, Math.floor(ms / 1000))
@@ -154,6 +151,9 @@ export struct VideoPlayerCard {
     return `${this.pad2(minutes)}:${this.pad2(seconds)}`
   }
 
+  /**
+   * 数字补零
+   */
   private pad2(n: number): string {
     return n < 10 ? `0${n}` : `${n}`
   }

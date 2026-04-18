@@ -1,8 +1,10 @@
 /**
- * 底部控制面板组件
- * 包含重连按钮、IP设置和服务状态快速查看
+ * 底部控制面板组件（优化版）
+ * 使用 HarmonyOS SymbolGlyph 系统图标
  */
 import { hilog } from '@kit.PerformanceAnalysisKit'
+import { AppColors, AppSizes } from './StatusPanel'
+import { SysIcons } from '../constants/IconResources'
 
 const TAG = 'ControlPanel'
 const DOMAIN = 0x0000
@@ -25,29 +27,34 @@ export struct ControlPanel {
       // 标题
       Text('快速操作')
         .fontSize(16)
-        .fontWeight(FontWeight.Medium)
-        .fontColor('#F1F5F9')
+        .fontWeight(FontWeight.Bold)
+        .fontColor(AppColors.TEXT_PRIMARY)
         .width('100%')
-        .margin({ bottom: 12 })
+        .margin({ bottom: AppSizes.SPACING_MD })
 
       // 连接控制区域
       Row() {
-        // 连接状态指示
+        // 左侧：连接状态指示
         Column() {
-          Row({ space: 8 }) {
+          Row({ space: AppSizes.SPACING_SM }) {
+            // 状态指示点
             Circle()
               .width(12)
               .height(12)
               .fill(this.getConnectionColor())
+
+            // 状态文本
             Text(this.getConnectionStatusText())
               .fontSize(14)
-              .fontColor('#F1F5F9')
+              .fontWeight(FontWeight.Medium)
+              .fontColor(AppColors.TEXT_PRIMARY)
           }
 
+          // 已连接时显示 IP 地址
           if (this.webSocketConnected) {
             Text(this.carIpAddress)
               .fontSize(12)
-              .fontColor('#94A3B8')
+              .fontColor(AppColors.TEXT_SECONDARY)
               .margin({ top: 4 })
           }
         }
@@ -55,75 +62,76 @@ export struct ControlPanel {
 
         Blank()
 
-        // 重新连接按钮
+        // 右侧：重新连接按钮
         Button(this.isConnecting ? '连接中...' : '重新连接')
           .fontSize(14)
           .fontColor('#FFFFFF')
-          .backgroundColor('#6366F1')
-          .borderRadius(8)
-          .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+          .backgroundColor(AppColors.PRIMARY)
+          .borderRadius(AppSizes.RADIUS_MD)
+          .padding({
+            left: AppSizes.SPACING_LG,
+            right: AppSizes.SPACING_LG,
+            top: AppSizes.SPACING_SM,
+            bottom: AppSizes.SPACING_SM
+          })
           .enabled(!this.isConnecting)
-          .opacity(this.isConnecting ? 0.6 : 1)
+          .opacity(this.isConnecting ? 0.6 : 1.0)
           .onClick(() => {
             hilog.info(DOMAIN, TAG, '用户点击重新连接按钮')
             this.onReconnect?.()
           })
+          .stateEffect(true)
       }
       .width('100%')
-      .padding(12)
-      .backgroundColor('#0F172A')
-      .borderRadius(12)
-      .margin({ bottom: 12 })
+      .padding(AppSizes.SPACING_MD)
+      .backgroundColor(AppColors.BG_ELEMENT)
+      .borderRadius(AppSizes.RADIUS_MD)
+      .margin({ bottom: AppSizes.SPACING_MD })
 
-      // IP设置和服务状态
+      // 底部操作行
       Row() {
         // IP设置按钮
         Button() {
-          Row({ space: 8 }) {
-            Text('⚙️')
-              .fontSize(16)
+          Row({ space: AppSizes.SPACING_SM }) {
+            // 设置图标 - 使用系统图标
+            SymbolGlyph($r(`sys.symbol.${SysIcons.SETTINGS}`))
+              .fontSize(AppSizes.ICON_MD)
+              .fontColor([AppColors.TEXT_SECONDARY])
+
+            // 按钮文字
             Text('设置车机IP')
               .fontSize(13)
-              .fontColor('#F1F5F9')
+              .fontColor(AppColors.TEXT_SECONDARY)
           }
         }
         .type(ButtonType.Normal)
-        .backgroundColor('#0F172A')
-        .borderRadius(8)
-        .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+        .backgroundColor(AppColors.BG_ELEMENT)
+        .borderRadius(AppSizes.RADIUS_MD)
+        .padding({
+          left: AppSizes.SPACING_MD,
+          right: AppSizes.SPACING_MD,
+          top: AppSizes.SPACING_SM,
+          bottom: AppSizes.SPACING_SM
+        })
         .onClick(() => {
           hilog.info(DOMAIN, TAG, '用户点击设置车机IP按钮')
           this.onConfigureIp?.()
         })
+        .stateEffect(true)
 
         Blank()
 
-        // 应用状态提示
-        Text('FSCast Remote v0.3.0')
+        // 应用版本信息
+        Text('FSCast Remote v1.0.0')
           .fontSize(11)
-          .fontColor('#64748B')
+          .fontColor(AppColors.TEXT_DISABLED)
       }
       .width('100%')
     }
     .width('100%')
-    .padding(16)
-    .backgroundColor('#1E293B')
-    .borderRadius(16)
-  }
-
-  /**
-   * 服务状态指示点
-   */
-  @Builder ServiceStatusDot(label: string, isRunning: boolean) {
-    Row({ space: 4 }) {
-      Circle()
-        .width(6)
-        .height(6)
-        .fill(isRunning ? '#10B981' : '#64748B')
-      Text(label)
-        .fontSize(11)
-        .fontColor('#94A3B8')
-    }
+    .padding(AppSizes.SPACING_LG)
+    .backgroundColor(AppColors.BG_CARD)
+    .borderRadius(AppSizes.RADIUS_LG)
   }
 
   /**
@@ -131,12 +139,12 @@ export struct ControlPanel {
    */
   private getConnectionColor(): string {
     if (this.isConnecting) {
-      return '#F59E0B'  // 橙色 - 连接中
+      return AppColors.WARNING  // 橙色 - 连接中
     }
     if (this.webSocketConnected) {
-      return '#10B981'  // 绿色 - 已连接
+      return AppColors.SUCCESS  // 绿色 - 已连接
     }
-    return '#EF4444'    // 红色 - 未连接
+    return AppColors.ERROR      // 红色 - 未连接
   }
 
   /**

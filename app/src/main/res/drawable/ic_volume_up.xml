@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-IconPark Play图标（outline主题）
+IconPark VolumeUp图标（outline主题）
 从 https://iconpark.oceanengine.com/ 自动生成
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
@@ -10,8 +10,11 @@ IconPark Play图标（outline主题）
     android:viewportHeight="48">
     <path
         android:fillColor="#E8E8E8"
-        android:pathData="M24 44C35.0457 44 44 35.0457 44 24C44 12.9543 35.0457 4 24 4C12.9543 4 4 12.9543 4 24C4 35.0457 12.9543 44 24 44Z"/>
+        android:pathData="M24 6V42C17 42 11.7985 32.8391 11.7985 32.8391H6C4.89543 32.8391 4 31.9437 4 30.8391V17.0108C4 15.9062 4.89543 15.0108 6 15.0108H11.7985C11.7985 15.0108 17 6 24 6Z"/>
     <path
         android:fillColor="#E8E8E8"
-        android:pathData="M20 24V17.0718L26 20.5359L32 24L26 27.4641L20 30.9282V24Z"/>
+        android:pathData="M32 24H44"/>
+    <path
+        android:fillColor="#E8E8E8"
+        android:pathData="M38 18V30"/>
 </vector>

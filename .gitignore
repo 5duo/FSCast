@@ -57,3 +57,4 @@ companion-harmony/.hvigor/
 
 # Android companion 构建产物
 companion-android/build/
+node_modules

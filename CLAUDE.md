@@ -711,3 +711,24 @@ await backgroundTaskManager.startBackgroundRunning(context, BackgroundMode.AUDIO
 - **Permission**: KEEP_BACKGROUND_RUNNING required for background audio
 - **Configuration**: backgroundModes must include "audioPlayback"
 - **ArkTS Limitations**: No URL class, no any/unknown types, limited API surface
+
+### MCP Servers Available
+
+#### search_harmonyos_docs
+官方 HarmonyOS 文档查询服务器，用于获取最新的 API 参考和开发指南。
+
+**使用方法**：
+- `mcp__harmonyos-docs__search_harmonyos_docs` - 搜索文档
+- `mcp__harmonyos-docs__get_harmonyos_doc` - 获取完整文档
+- `mcp__harmonyos-docs__list_harmonyos_categories` - 列出文档分类
+
+**使用场景**：
+- 查找 API 用法和官方示例
+- 了解 HarmonyOS NEXT 新特性
+- 解决开发问题（官方文档最准确）
+
+**相关资源**：
+- [HarmonyOS Symbol 图标库](https://developer.huawei.com/consumer/cn/design/harmonyos-symbol/)
+- [华为开发者联盟](https://developer.huawei.com/consumer/cn/)
+
+**项目记忆**：详见 `memory/harmonyos_docs_mcp.md`
