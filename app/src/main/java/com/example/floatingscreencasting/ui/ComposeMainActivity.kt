@@ -349,8 +349,12 @@ class ComposeMainActivity : AppCompatActivity() {
         // 执行播放器操作（ExoPlayer方法是线程安全的）
         try {
             if (wasPlaying) {
+                // 暂停播放，通知DLNA服务更新状态
+                dlnaService.updateTransportState("PAUSED_PLAYBACK")
                 videoPresentation?.pause()
             } else {
+                // 恢复播放，通知DLNA服务更新状态
+                dlnaService.updateTransportState("PLAYING")
                 videoPresentation?.play()
             }
         } catch (e: Exception) {

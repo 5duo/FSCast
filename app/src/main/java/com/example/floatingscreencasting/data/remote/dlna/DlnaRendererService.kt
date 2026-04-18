@@ -250,6 +250,7 @@ class DlnaRendererService(private val context: Context) {
 
         if (uri.isBlank()) {
             // 恢复播放（暂停后再播放的情况）
+            httpServer.updateTransportState("PLAYING")
             onCastingStateChanged?.invoke(true, "投屏中")
             onPlay?.invoke()  // 调用play恢复播放
             return
@@ -275,6 +276,9 @@ class DlnaRendererService(private val context: Context) {
         try {
             // 检查onPlayMedia回调是否设置
             Log.d(TAG, "onPlayMedia回调是否为null: ${onPlayMedia == null}")
+
+            // 更新传输状态为PLAYING
+            httpServer.updateTransportState("PLAYING")
 
             // 通过EventBus或回调通知Presentation播放视频
             // 传递标题和时长信息
@@ -324,6 +328,7 @@ class DlnaRendererService(private val context: Context) {
      */
     private suspend fun handlePauseCommand() {
         Log.d(TAG, "处理暂停命令")
+        httpServer.updateTransportState("PAUSED_PLAYBACK")
         onPauseMedia?.invoke()
     }
 
