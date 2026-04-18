@@ -292,7 +292,7 @@ class DlnaRendererService(private val context: Context) {
                 mediaMetadata.title
             }
 
-            onPlayMediaWithMetadata?.invoke(uri, httpHeaders, displayTitle, mediaMetadata.durationMs)
+            onPlayMediaWithMetadata?.invoke(uri, httpHeaders, displayTitle, mediaMetadata.durationMs, mediaMetadata.initialPositionMs)
                 ?: onPlayMedia?.invoke(uri, httpHeaders)
 
             Log.d(TAG, "onPlayMedia回调已调用，标题: $displayTitle")
@@ -355,7 +355,7 @@ class DlnaRendererService(private val context: Context) {
 
     // 媒体控制回调
     var onPlayMedia: ((String, Map<String, String>) -> Unit)? = null
-    var onPlayMediaWithMetadata: ((String, Map<String, String>, String, Long) -> Unit)? = null
+    var onPlayMediaWithMetadata: ((String, Map<String, String>, String, Long, Long) -> Unit)? = null
     var onStopMedia: (() -> Unit)? = null
     var onPauseMedia: (() -> Unit)? = null
     var onPlay: (() -> Unit)? = null

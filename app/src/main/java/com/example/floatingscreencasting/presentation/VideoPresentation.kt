@@ -401,16 +401,21 @@ class VideoPresentation(
      * 播放媒体
      */
     fun playMedia(uri: String) {
-        playMedia(uri, "", 0)
+        playMedia(uri, "", 0, 0)
     }
 
     fun playMedia(uri: String, title: String, durationMs: Long) {
+        playMedia(uri, title, durationMs, 0)
+    }
+
+    fun playMedia(uri: String, title: String, durationMs: Long, initialPositionMs: Long) {
         android.util.Log.d("VideoPresentation", "========== playMedia开始 ==========")
         android.util.Log.d("VideoPresentation", "playMedia被调用，uri长度: ${uri.length}")
         android.util.Log.d("VideoPresentation", "当前URI: ${currentUri.take(50)}...")
         android.util.Log.d("VideoPresentation", "新URI: ${uri.take(50)}...")
         android.util.Log.d("VideoPresentation", "视频标题: $title")
         android.util.Log.d("VideoPresentation", "视频时长: ${durationMs}ms")
+        android.util.Log.d("VideoPresentation", "初始位置: ${initialPositionMs}ms")
         android.util.Log.d("VideoPresentation", "isPlaying: ${isPlaying()}")
 
         // 检查是否是相同的URL（恢复播放）
@@ -442,13 +447,13 @@ class VideoPresentation(
             Handler(Looper.getMainLooper()).postDelayed({
                 if (exoPlayer != null) {
                     android.util.Log.d("VideoPresentation", "ExoPlayer已初始化，继续播放")
-                    doPlayMedia(uri, title, durationMs)
+                    doPlayMedia(uri, title, durationMs, initialPositionMs)
                 } else {
                     android.util.Log.e("VideoPresentation", "ExoPlayer初始化超时！")
                 }
             }, 500)
         } else {
-            doPlayMedia(uri, title, durationMs)
+            doPlayMedia(uri, title, durationMs, initialPositionMs)
         }
     }
 
@@ -456,10 +461,14 @@ class VideoPresentation(
      * 实际执行播放
      */
     private fun doPlayMedia(uri: String) {
-        doPlayMedia(uri, "", 0)
+        doPlayMedia(uri, "", 0, 0)
     }
 
     private fun doPlayMedia(uri: String, title: String, durationMs: Long) {
+        doPlayMedia(uri, title, durationMs, 0)
+    }
+
+    private fun doPlayMedia(uri: String, title: String, durationMs: Long, initialPositionMs: Long) {
         // 保存当前播放的URL和元数据
         currentUri = uri
         currentTitle = title
@@ -664,6 +673,13 @@ class VideoPresentation(
             val mediaItem = mediaItemBuilder.build()
             setMediaItem(mediaItem)
             prepare()
+
+            // 如果有初始位置，seek到该位置
+            if (initialPositionMs > 0) {
+                android.util.Log.d("VideoPresentation", "Seek到初始位置: ${initialPositionMs}ms")
+                seekTo(initialPositionMs)
+            }
+
             play()
             android.util.Log.d("VideoPresentation", "ExoPlayer已开始播放")
             android.util.Log.d("VideoPresentation", "是否正在播放: $isPlaying")

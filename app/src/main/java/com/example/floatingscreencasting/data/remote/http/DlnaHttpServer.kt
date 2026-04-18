@@ -15,7 +15,8 @@ data class DlnaMediaMetadata(
     val uri: String,
     val title: String = "",
     val durationMs: Long = 0,
-    val httpHeaders: Map<String, String> = emptyMap()
+    val httpHeaders: Map<String, String> = emptyMap(),
+    val initialPositionMs: Long = 0  // 初始播放位置（毫秒），用于从指定进度开始播放
 )
 
 /**
@@ -77,6 +78,7 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
     private var currentUri: String = ""  // 保存当前播放的URI
     private var currentMetadata: String = ""  // 保存当前播放的DIDL-Lite metadata
     private var metadataDurationSeconds: Long = 0L  // 保存metadata中的时长（秒）作为后备值
+    private var lastSeekPosition: String = ""  // 保存最后接收到的Seek位置（用于Play命令时跳转）
 
     /**
      * 设置播放命令回调
@@ -238,6 +240,12 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                 Log.d(TAG, "URI长度: ${uri.length}")
                 Log.d(TAG, "Metadata: ${metadata.take(500)}")
 
+                // 清除之前保存的Seek位置（新视频开始播放）
+                if (lastSeekPosition.isNotEmpty()) {
+                    Log.d(TAG, "清除之前保存的Seek位置: $lastSeekPosition")
+                    lastSeekPosition = ""
+                }
+
                 // 解析metadata获取标题和时长
                 val (title, durationMs, metadataHeaders) = parseMetadata(metadata)
 
@@ -310,15 +318,32 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
 
             soapAction?.contains("#Play") == true -> {
                 // 播放命令（对于已设置的URI）
-                Log.d(TAG, "收到Play命令")
+                Log.d(TAG, "========== 收到Play命令 ==========")
+                if (lastSeekPosition.isNotEmpty()) {
+                    Log.d(TAG, "检测到之前保存的Seek位置: $lastSeekPosition")
+                }
                 transportState = "PLAYING"
 
-                // 创建空的元数据对象（恢复播放）
+                // 将Seek位置转换为毫秒
+                val initialPositionMs = if (lastSeekPosition.isNotEmpty()) {
+                    parseSeekPositionToMs(lastSeekPosition)
+                } else {
+                    0L
+                }
+
+                // 清除保存的Seek位置（避免影响下次播放）
+                if (lastSeekPosition.isNotEmpty()) {
+                    Log.d(TAG, "使用Seek位置: ${initialPositionMs}ms，清除保存的位置")
+                    lastSeekPosition = ""
+                }
+
+                // 创建元数据对象（恢复播放），包含初始位置
                 val emptyMetadata = DlnaMediaMetadata(
                     uri = "",
                     title = "",
                     durationMs = 0,
-                    httpHeaders = lastHttpHeaders
+                    httpHeaders = lastHttpHeaders,
+                    initialPositionMs = initialPositionMs
                 )
 
                 CoroutineScope(Dispatchers.Main).launch {
@@ -406,8 +431,14 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
             soapAction?.contains("#Seek") == true -> {
                 val unit = extractValue(body, "Unit")
                 val target = extractValue(body, "Target")
-                Log.d(TAG, "收到Seek命令: unit=$unit, target=$target")
-                Log.d(TAG, "Seek请求体: $body")
+                Log.d(TAG, "========== 收到Seek命令 ==========")
+                Log.d(TAG, "Unit: $unit")
+                Log.d(TAG, "Target: $target")
+                Log.d(TAG, "完整请求体: $body")
+
+                // 保存Seek位置，供后续Play命令使用
+                lastSeekPosition = target
+                Log.d(TAG, "已保存Seek位置: $target")
 
                 // 验证target格式
                 if (target.contains(":")) {
@@ -611,6 +642,54 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
         val pattern = "<(?:ns0:)?$tagName[^>]*>(.*?)</(?:ns0:)?$tagName>".toRegex()
         val match = pattern.find(xml)
         return match?.groupValues?.get(1)?.trim() ?: ""
+    }
+
+    /**
+     * 将Seek位置字符串转换为毫秒
+     * 支持格式：
+     * - HH:MM:SS (绝对时间)
+     * - MM:SS (相对时间)
+     * - 纯数字 (秒)
+     * @param seekPosition Seek位置字符串
+     * @return 毫秒数
+     */
+    private fun parseSeekPositionToMs(seekPosition: String): Long {
+        return try {
+            when {
+                // HH:MM:SS格式
+                seekPosition.count { it == ':' } == 2 -> {
+                    val parts = seekPosition.split(":")
+                    val hours = parts[0].toLong()
+                    val minutes = parts[1].toLong()
+                    val seconds = parts[2].toLong()
+                    val totalMs = (hours * 3600 + minutes * 60 + seconds) * 1000
+                    Log.d(TAG, "Seek位置解析(HH:MM:SS): $seekPosition = ${totalMs}ms")
+                    totalMs
+                }
+                // MM:SS格式
+                seekPosition.contains(":") -> {
+                    val parts = seekPosition.split(":")
+                    val minutes = parts[0].toLong()
+                    val seconds = parts[1].toLong()
+                    val totalMs = (minutes * 60 + seconds) * 1000
+                    Log.d(TAG, "Seek位置解析(MM:SS): $seekPosition = ${totalMs}ms")
+                    totalMs
+                }
+                // 纯数字格式（秒）
+                seekPosition.all { it.isDigit() || it == '-' } -> {
+                    val totalMs = seekPosition.toLong() * 1000
+                    Log.d(TAG, "Seek位置解析(秒): $seekPosition = ${totalMs}ms")
+                    totalMs
+                }
+                else -> {
+                    Log.w(TAG, "未知Seek位置格式: $seekPosition")
+                    0L
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "解析Seek位置失败: $seekPosition", e)
+            0L
+        }
     }
 
     /**

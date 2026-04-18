@@ -1153,18 +1153,19 @@ class ComposeMainActivity : AppCompatActivity() {
                 }
             }
 
-            onPlayMediaWithMetadata = { uri, headers, title, durationMs ->
+            onPlayMediaWithMetadata = { uri, headers, title, durationMs, initialPositionMs ->
                 Log.d("ComposeMainActivity", "收到onPlayMediaWithMetadata回调")
                 Log.d("ComposeMainActivity", "URI: $uri")
                 Log.d("ComposeMainActivity", "标题: $title")
                 Log.d("ComposeMainActivity", "时长: ${durationMs}ms")
+                Log.d("ComposeMainActivity", "初始位置: ${initialPositionMs}ms")
                 Log.d("ComposeMainActivity", "HTTP头: $headers")
                 // 保存视频URI到AudioOutputController，以便后续切换音频输出时使用
                 audioOutputController.setCurrentVideoUri(uri, headers)
                 lifecycleScope.launch(Dispatchers.Main) {
                     try {
                         Log.d("ComposeMainActivity", "videoPresentation是否为null: ${videoPresentation == null}")
-                        videoPresentation?.playMedia(uri, title, durationMs)
+                        videoPresentation?.playMedia(uri, title, durationMs, initialPositionMs)
                         if (uri.isNotEmpty()) {
                             dlnaService.updateTransportState("PLAYING")
                             // 使用metadata中的标题，处理B站占位符：空、"video"、"studio_video_xxx"
