@@ -18,6 +18,11 @@ export class VideoPlayer {
   private currentPosition: number = 0
   private duration: number = 0
 
+  // 进度同步优化相关
+  private isPhoneMode: boolean = false
+  private seekDebounceTimer: number = -1
+  private readonly SEEK_DEBOUNCE_DELAY = 300
+
   // 事件回调
   private onPositionUpdate: ((position: number) => void) | null = null
   private onPlaybackStateChanged: ((isPlaying: boolean) => void) | null = null
@@ -313,7 +318,7 @@ export class VideoPlayer {
       await this.seek(intermediatePosition)
 
       // 等待缓冲（100ms）
-      await new Promise(resolve => setTimeout(resolve, 100))
+      await new Promise<void>(resolve => setTimeout(resolve, 100))
     }
 
     hilog.info(DOMAIN, TAG, '分段跳转完成')
