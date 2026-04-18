@@ -371,6 +371,8 @@ class ComposeMainActivity : AppCompatActivity() {
             currentVideoUrl = ""     // 清除视频URL
         )
         try {
+            // 通知DLNA服务更新传输状态为STOPPED，让B站App知道播放已停止
+            dlnaService.updateTransportState("STOPPED")
             videoPresentation?.stop()
             videoPresentation?.resetToInitialState()
         } catch (e: Exception) {
