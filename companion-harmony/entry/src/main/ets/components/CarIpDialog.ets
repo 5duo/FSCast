@@ -4,10 +4,27 @@
  * 支持自动扫描网段功能
  */
 import { hilog } from '@kit.PerformanceAnalysisKit'
-import { AppColors, AppSizes } from './StatusPanel'
-import { AppConfig } from '../constants/Config'
-import { SysIcons } from '../constants/IconResources'
+import { AppColors } from '../constants/AppColors'
 import { NetworkScanService, ScanResult } from '../service/NetworkScanService'
+
+// 内联尺寸常量
+const SPACING_SM = 8
+const SPACING_MD = 12
+const SPACING_LG = 16
+const SPACING_XL = 24
+const RADIUS_MD = 8
+const RADIUS_LG = 12
+
+// IP验证函数
+function isValidIp(ip: string): boolean {
+  const parts = ip.split('.')
+  if (parts.length !== 4) return false
+  for (const part of parts) {
+    const num = parseInt(part, 10)
+    if (isNaN(num) || num < 0 || num > 255) return false
+  }
+  return true
+}
 
 const TAG = 'CarIpDialog'
 const DOMAIN = 0x0000
@@ -37,20 +54,20 @@ export struct CarIpDialog {
   }
 
   build() {
-    Column({ space: AppSizes.SPACING_MD }) {
+    Column({ space: 12 }) {
       // 标题行
       Row() {
         // 标题图标 - 使用系统图标
-        SymbolGlyph($r(`sys.symbol.${SysIcons.SETTINGS}`))
-          .fontSize(AppSizes.ICON_LG)
-          .fontColor([AppColors.PRIMARY])
+        Text("⚙")
+          .fontSize(24)
+          .fontColor(AppColors.PRIMARY)
 
         // 标题文字
         Text('设置车机IP地址')
           .fontSize(18)
           .fontWeight(FontWeight.Bold)
           .fontColor(AppColors.TEXT_PRIMARY)
-          .margin({ left: AppSizes.SPACING_SM })
+          .margin({ left: 8 })
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
@@ -70,10 +87,10 @@ export struct CarIpDialog {
           .backgroundColor(AppColors.BG_PRIMARY)
           .borderColor(
             this.errorMessage.length > 0
-              ? AppColors.ERROR
+              ? AppColors.STATUS_WARNING
               : AppColors.BG_ELEMENT
           )
-          .borderRadius(AppSizes.RADIUS_MD)
+          .borderRadius(8)
           .height(48)
           .onChange((value: string) => {
             this.localIpAddress = value.trim()
@@ -85,17 +102,17 @@ export struct CarIpDialog {
 
         // 错误提示
         if (this.errorMessage.length > 0) {
-          Row({ space: AppSizes.SPACING_XS }) {
-            SymbolGlyph($r(`sys.symbol.${SysIcons.ERROR}`))
-              .fontSize(AppSizes.ICON_SM)
-              .fontColor([AppColors.ERROR])
+          Row({ space: 4 }) {
+            Text('⚠')
+              .fontSize(16)
+              .fontColor(AppColors.STATUS_WARNING)
 
             Text(this.errorMessage)
               .fontSize(12)
-              .fontColor(AppColors.ERROR)
+              .fontColor(AppColors.STATUS_WARNING)
           }
           .width('100%')
-          .margin({ top: AppSizes.SPACING_XS })
+          .margin({ top: 4 })
         }
       }
       .width('100%')
@@ -104,53 +121,53 @@ export struct CarIpDialog {
       Column() {
         // 区域标题
         Row() {
-          SymbolGlyph($r(`sys.symbol.${SysIcons.LINK}`))
-            .fontSize(AppSizes.ICON_SM)
-            .fontColor([AppColors.TEXT_SECONDARY])
+          Text("🔗").fontSize(16).fontColor(AppColors.TEXT_SECONDARY)
+            .fontSize(16)
+            .fontColor(AppColors.TEXT_SECONDARY)
 
           Text('常用地址')
             .fontSize(13)
             .fontColor(AppColors.TEXT_SECONDARY)
-            .margin({ left: AppSizes.SPACING_XS })
+            .margin({ left: 4 })
         }
         .width('100%')
-        .margin({ bottom: AppSizes.SPACING_SM })
+        .margin({ bottom: 8 })
 
         // 快速选择按钮
-        Row({ space: AppSizes.SPACING_SM }) {
+        Row({ space: 8 }) {
           this.QuickIpButton('192.168.1.100')
-          this.QuickIpButton(AppConfig.DEFAULTS.CAR_IP)
+          this.QuickIpButton('192.168.200.47')
           this.QuickIpButton('192.168.0.100')
         }
         .width('100%')
       }
       .width('100%')
-      .padding(AppSizes.SPACING_MD)
+      .padding(12)
       .backgroundColor(AppColors.BG_PRIMARY)
-      .borderRadius(AppSizes.RADIUS_MD)
+      .borderRadius(8)
 
       // 扫描网段区域
       Column() {
         // 区域标题
         Row() {
-          SymbolGlyph($r(`sys.symbol.${SysIcons.SEARCH}`))
-            .fontSize(AppSizes.ICON_SM)
-            .fontColor([AppColors.TEXT_SECONDARY])
+          Text("🔍").fontSize(16).fontColor(AppColors.TEXT_SECONDARY)
+            .fontSize(16)
+            .fontColor(AppColors.TEXT_SECONDARY)
 
           Text('自动扫描')
             .fontSize(13)
             .fontColor(AppColors.TEXT_SECONDARY)
-            .margin({ left: AppSizes.SPACING_XS })
+            .margin({ left: 4 })
         }
         .width('100%')
-        .margin({ bottom: AppSizes.SPACING_SM })
+        .margin({ bottom: 8 })
 
         // 扫描按钮
         Button(this.isScanning ? this.scanProgress : '扫描网段')
           .fontSize(13)
           .fontColor(this.isScanning ? AppColors.TEXT_SECONDARY : AppColors.PRIMARY)
           .backgroundColor(AppColors.BG_ELEMENT)
-          .borderRadius(AppSizes.RADIUS_MD)
+          .borderRadius(8)
           .width('100%')
           .height(40)
           .enabled(!this.isScanning)
@@ -161,16 +178,16 @@ export struct CarIpDialog {
 
         // 扫描结果
         if (this.scanResults.length > 0) {
-          Column({ space: AppSizes.SPACING_XS }) {
+          Column({ space: 4 }) {
             ForEach(this.scanResults, (result: ScanResult, index: number) => {
               Button(`✓ ${result.ip}`)
                 .fontSize(12)
                 .fontColor(AppColors.PRIMARY)
                 .backgroundColor(AppColors.BG_ELEMENT)
-                .borderRadius(AppSizes.RADIUS_SM)
+                .borderRadius(4)
                 .padding({
-                  left: AppSizes.SPACING_SM,
-                  right: AppSizes.SPACING_SM,
+                  left: 8,
+                  right: 8,
                   top: 6,
                   bottom: 6
                 })
@@ -183,22 +200,22 @@ export struct CarIpDialog {
             })
           }
           .width('100%')
-          .margin({ top: AppSizes.SPACING_SM })
+          .margin({ top: 8 })
         }
       }
       .width('100%')
-      .padding(AppSizes.SPACING_MD)
+      .padding(12)
       .backgroundColor(AppColors.BG_PRIMARY)
-      .borderRadius(AppSizes.RADIUS_MD)
+      .borderRadius(8)
 
       // 按钮区域
-      Row({ space: AppSizes.SPACING_MD }) {
+      Row({ space: 12 }) {
         // 取消按钮
         Button('取消')
           .fontSize(14)
           .fontColor(AppColors.TEXT_PRIMARY)
           .backgroundColor(AppColors.BG_ELEMENT)
-          .borderRadius(AppSizes.RADIUS_MD)
+          .borderRadius(8)
           .layoutWeight(1)
           .height(44)
           .onClick(() => {
@@ -212,7 +229,7 @@ export struct CarIpDialog {
           .fontSize(14)
           .fontColor('#FFFFFF')
           .backgroundColor(AppColors.PRIMARY)
-          .borderRadius(AppSizes.RADIUS_MD)
+          .borderRadius(8)
           .layoutWeight(1)
           .height(44)
           .onClick(() => {
@@ -227,9 +244,9 @@ export struct CarIpDialog {
       .width('100%')
     }
     .width(280)
-    .padding(AppSizes.SPACING_XL)
+    .padding(24)
     .backgroundColor(AppColors.BG_CARD)
-    .borderRadius(AppSizes.RADIUS_LG)
+    .borderRadius(12)
   }
 
   /**
@@ -240,10 +257,10 @@ export struct CarIpDialog {
       .fontSize(12)
       .fontColor(AppColors.TEXT_PRIMARY)
       .backgroundColor(AppColors.BG_ELEMENT)
-      .borderRadius(AppSizes.RADIUS_SM)
+      .borderRadius(4)
       .padding({
-        left: AppSizes.SPACING_SM,
-        right: AppSizes.SPACING_SM,
+        left: 8,
+        right: 8,
         top: 6,
         bottom: 6
       })
@@ -266,7 +283,7 @@ export struct CarIpDialog {
     }
 
     // 验证IP格式
-    if (!AppConfig.isValidIp(this.localIpAddress)) {
+    if (!isValidIp(this.localIpAddress)) {
       this.errorMessage = 'IP地址格式不正确'
       return false
     }

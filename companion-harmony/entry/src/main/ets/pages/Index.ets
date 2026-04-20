@@ -17,7 +17,7 @@ import { MediaSessionService } from '../service/MediaSessionService'
 import { BackgroundService } from '../service/BackgroundService'
 import { ConnectionStatusCard } from '../components/ConnectionStatusCard'
 import { VideoPlayerCard } from '../components/VideoPlayerCard'
-import { VideoUrlCard } from '../components/VideoUrlCard'
+// import { VideoUrlCard } from '../components/VideoUrlCard'  // 已删除
 // import { ControlPanel } from '../components/ControlPanel'  // 已移除，功能整合到StatusPanel
 import { CarIpDialog } from '../components/CarIpDialog'
 import { NetworkScanService } from '../service/NetworkScanService'
@@ -1097,22 +1097,6 @@ struct Index {
             await this.autoScanAndConnect()
           }
         })
-
-        // 视频URL卡片（收到URI且WebSocket连接时显示）
-        if (this.dlnaUri.length > 0 && this.webSocketConnected) {
-          VideoUrlCard({
-            dlnaUri: this.dlnaUri,
-            dlnaHttpHeaders: this.dlnaHttpHeaders,
-            isDownloading: $isDownloading,
-            downloadProgress: $downloadProgress,
-            onCopy: () => {
-              this.showCopySuccessToast()
-            },
-            onDownload: (uri: string, headers: Record<string, string>) => {
-              this.downloadVideo(uri, headers)
-            }
-          })
-        }
 
         // 视频播放器（有URI且WebSocket连接时显示）
         if (this.dlnaUri.length > 0 && this.webSocketConnected) {

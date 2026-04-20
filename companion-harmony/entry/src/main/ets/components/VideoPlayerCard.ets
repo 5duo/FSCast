@@ -3,9 +3,14 @@
  * 使用兼容性图标组件
  */
 import { hilog } from '@kit.PerformanceAnalysisKit'
-import { AppColors, AppSizes } from './StatusPanel'
-import { SysIcons } from '../constants/IconResources'
-import { TextIcon } from './IconCompat'
+import { AppColors } from '../constants/AppColors'
+
+// 内联尺寸常量
+const SPACING_SM = 8
+const SPACING_MD = 12
+const SPACING_LG = 16
+const RADIUS_MD = 8
+const RADIUS_LG = 12
 
 const TAG = 'VideoPlayerCard'
 const DOMAIN = 0x0000
@@ -54,7 +59,7 @@ export struct VideoPlayerCard {
         }
       }
       .width('100%')
-      .margin({ bottom: AppSizes.SPACING_MD })
+      .margin({ bottom: 12 })
 
       // 视频播放器
       if (this.dlnaUri.length > 0) {
@@ -65,7 +70,7 @@ export struct VideoPlayerCard {
           .width('100%')
           .aspectRatio(16 / 9)
           .backgroundColor('#000000')
-          .borderRadius(AppSizes.RADIUS_MD)
+          .borderRadius(8)
           .autoPlay(true)
           .controls(true)
           .loop(false)
@@ -95,13 +100,11 @@ export struct VideoPlayerCard {
       } else {
         // 等待URL占位符
         Column() {
-          // 暂停图标 - 使用兼容性图标
-          TextIcon({
-            iconKey: 'PAUSE',
-            fontSize: 48,
-            fontColor: AppColors.TEXT_DISABLED
-          })
-            .margin({ bottom: AppSizes.SPACING_MD })
+          // 暂停图标
+          Text('⏸')
+            .fontSize(48)
+            .fontColor(AppColors.TEXT_DISABLED)
+            .margin({ bottom: 12 })
 
           // 提示文字
           Text('等待投屏...')
@@ -111,7 +114,7 @@ export struct VideoPlayerCard {
         .width('100%')
         .aspectRatio(16 / 9)
         .backgroundColor(AppColors.BG_PRIMARY)
-        .borderRadius(AppSizes.RADIUS_MD)
+        .borderRadius(8)
         .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
       }
@@ -130,13 +133,13 @@ export struct VideoPlayerCard {
             .fontColor(AppColors.TEXT_SECONDARY)
         }
         .width('100%')
-        .margin({ top: AppSizes.SPACING_SM })
+        .margin({ top: 8 })
       }
     }
     .width('100%')
-    .padding(AppSizes.SPACING_LG)
+    .padding(16)
     .backgroundColor(AppColors.BG_CARD)
-    .borderRadius(AppSizes.RADIUS_LG)
+    .borderRadius(12)
   }
 
   /**

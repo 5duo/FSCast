@@ -3,8 +3,14 @@
  * 独立显示WebSocket连接状态和本机IP
  */
 import { hilog } from '@kit.PerformanceAnalysisKit'
-import { AppColors, AppSizes } from './StatusPanel'
-import { TextIcon } from './IconCompat'
+import { AppColors } from '../constants/AppColors'
+
+// 内联尺寸常量
+const SPACING_SM = 8
+const SPACING_MD = 12
+const SPACING_LG = 16
+const RADIUS_MD = 8
+const RADIUS_LG = 12
 
 const TAG = 'ConnectionStatusCard'
 const DOMAIN = 0x0000
@@ -23,7 +29,7 @@ export struct ConnectionStatusCard {
       // 第一行：连接状态
       Row() {
         // 左侧：连接状态
-        Row({ space: AppSizes.SPACING_SM }) {
+        Row({ space: SPACING_SM }) {
           // 状态指示点
           Circle()
             .width(12)
@@ -48,25 +54,23 @@ export struct ConnectionStatusCard {
 
         // 右侧：刷新按钮（带旋转动效和禁用状态）
         Button() {
-          TextIcon({
-            iconKey: 'REFRESH',
-            fontSize: AppSizes.ICON_MD,
-            fontColor: this.isRefreshing ? AppColors.TEXT_DISABLED : AppColors.TEXT_SECONDARY
-          })
+          Text('🔄')
+            .fontSize(16)
+            .fontColor(this.isRefreshing ? AppColors.TEXT_DISABLED : AppColors.TEXT_SECONDARY)
             .rotate(this.isRefreshing ? { angle: 360 } : { angle: 0 })
             .animation({
               duration: 1000,
               curve: Curve.Linear,
-              iterations: this.isRefreshing ? -1 : 1  // 无限旋转或停止
+              iterations: this.isRefreshing ? -1 : 1
             })
         }
         .width(36)
         .height(36)
         .backgroundColor(AppColors.BG_ELEMENT)
-        .borderRadius(AppSizes.RADIUS_SM)
+        .borderRadius(4)
         .type(ButtonType.Normal)
-        .enabled(!this.isRefreshing)  // 刷新时禁用按钮
-        .opacity(this.isRefreshing ? 0.5 : 1.0)  // 刷新时半透明
+        .enabled(!this.isRefreshing)
+        .opacity(this.isRefreshing ? 0.5 : 1.0)
         .onClick(() => {
           if (!this.isRefreshing) {
             hilog.info(DOMAIN, TAG, '用户点击刷新按钮')
@@ -85,7 +89,7 @@ export struct ConnectionStatusCard {
             .fontColor(AppColors.TEXT_SECONDARY)
         }
         .width('100%')
-        .padding({ top: AppSizes.SPACING_SM })
+        .padding({ top: SPACING_SM })
       }
 
       // 第三行：扫描进度（如果有）
@@ -96,12 +100,12 @@ export struct ConnectionStatusCard {
             .fontColor(AppColors.PRIMARY)
         }
         .width('100%')
-        .padding({ top: AppSizes.SPACING_SM })
+        .padding({ top: SPACING_SM })
       }
     }
     .width('100%')
-    .padding(AppSizes.SPACING_LG)
+    .padding(16)
     .backgroundColor(AppColors.BG_CARD)
-    .borderRadius(AppSizes.RADIUS_LG)
+    .borderRadius(12)
   }
 }
