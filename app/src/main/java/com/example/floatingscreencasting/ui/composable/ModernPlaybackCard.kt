@@ -31,18 +31,24 @@ import com.example.floatingscreencasting.ui.theme.*
  * 现代化播放控制卡片
  * 使用渐变背景和更好的视觉层次
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModernPlaybackControlCard(
     isPlaying: Boolean,
     currentPosition: Long,
     duration: Long,
     isMuted: Boolean,
+    audioOutputMode: String = "speaker",
+    connectedPhoneDevice: String? = null,
+    phoneDeviceCount: Int = 0,
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onMute: () -> Unit,
     onSeek: (Float) -> Unit,
+    onAudioOutputChange: () -> Unit = {},
+    onScanDevices: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     ModernCard(modifier = modifier) {
@@ -65,6 +71,18 @@ fun ModernPlaybackControlCard(
 
             Spacer(modifier = Modifier.height(20.dp))
 
+            // 音频输出选择器
+            AudioOutputSelector(
+                currentMode = audioOutputMode,
+                connectedDevice = connectedPhoneDevice,
+                deviceCount = phoneDeviceCount,
+                webSocketConnected = phoneDeviceCount > 0,  // 是否有WebSocket客户端连接
+                onModeChange = onAudioOutputChange,
+                onScanDevices = onScanDevices
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
             // 进度条
             ModernProgressBar(
                 currentPosition = currentPosition,
@@ -78,21 +96,170 @@ fun ModernPlaybackControlCard(
             ModernPlaybackControls(
                 isPlaying = isPlaying,
                 isMuted = isMuted,
+                audioOutputMode = audioOutputMode,
                 onPlayPause = onPlayPause,
                 onStop = onStop,
                 onPrevious = onPrevious,
                 onNext = onNext,
-                onMute = onMute
+                onMute = onMute,
+                onAudioOutputChange = onAudioOutputChange
             )
         }
     }
 }
 
 /**
- * 状态指示器
+ * 音频输出选择器
+ * 显示当前输出模式和设备状态
  */
 @Composable
-private fun StatusIndicator(isPlaying: Boolean, hasContent: Boolean) {
+private fun AudioOutputSelector(
+    currentMode: String,
+    connectedDevice: String?,
+    deviceCount: Int,
+    webSocketConnected: Boolean = false,  // WebSocket连接状态
+    onModeChange: () -> Unit,
+    onScanDevices: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = SurfaceVariant.copy(alpha = 0.3f),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .padding(16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // 左侧：当前输出模式
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            val (icon, iconColor, modeText) = when (currentMode) {
+                "phone" -> Triple("📱", Color(0xFF6366F1), "FSCast Remote")
+                "bilibili" -> Triple("📺", Color(0xFF00A1D6), "原源模式")
+                else -> Triple("🔊", OnSurface, "车机扬声器")
+            }
+            Text(
+                text = icon,
+                style = MaterialTheme.typography.titleLarge,
+                color = iconColor
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = "音频输出",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurfaceVariant
+                )
+                Text(
+                    text = modeText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = OnSurface,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        // 中间：设备状态（仅手机模式显示）
+        if (currentMode == "phone") {
+            if (connectedDevice != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(
+                                color = Color(0xFF10B981),
+                                shape = CircleShape
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = connectedDevice,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OnSurfaceVariant
+                    )
+                }
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(
+                                color = Color(0xFFF59E0B),
+                                shape = CircleShape
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "未连接",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFF59E0B)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+        }
+
+        // 右侧：切换按钮
+        // WebSocket已连接：speaker -> phone -> bilibili -> speaker（三种模式）
+        // WebSocket未连接：speaker <-> bilibili（两种模式切换）
+        val (nextModeText, buttonEnabled) = when (currentMode) {
+            "speaker" -> {
+                if (webSocketConnected) {
+                    Pair("切换到手机", true)
+                } else {
+                    Pair("切换到原源", true)
+                }
+            }
+            "phone" -> Pair("切换到原源", true)
+            "bilibili" -> Pair("切换到车机", true)
+            else -> Pair("切换到手机", webSocketConnected)
+        }
+        Surface(
+            onClick = onModeChange,
+            shape = RoundedCornerShape(8.dp),
+            color = SurfaceVariant,
+            enabled = buttonEnabled
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = nextModeText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (buttonEnabled) OnSurface else OnSurface.copy(alpha = 0.38f),
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "→",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (buttonEnabled) OnSurfaceVariant else OnSurfaceVariant.copy(alpha = 0.38f)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 播放状态指示器
+ */
+@Composable
+fun StatusIndicator(isPlaying: Boolean, hasContent: Boolean) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val scale by infiniteTransition.animateFloat(
         initialValue = 1f,
@@ -210,11 +377,13 @@ private fun TimeLabel(time: Long, label: String) {
 private fun ModernPlaybackControls(
     isPlaying: Boolean,
     isMuted: Boolean,
+    audioOutputMode: String,
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    onMute: () -> Unit
+    onMute: () -> Unit,
+    onAudioOutputChange: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -261,10 +430,26 @@ private fun ModernPlaybackControls(
 
         Spacer(modifier = Modifier.width(12.dp))
 
+        // 音频输出切换（支持三种模式：speaker -> phone -> bilibili）
+        val (audioIcon, audioDesc, audioTint) = when (audioOutputMode) {
+            "phone" -> Triple("📱", "输出到手机", Color(0xFF6366F1))
+            "bilibili" -> Triple("📺", "原源模式", Color(0xFF00A1D6))
+            else -> Triple("🔊", "输出到车机", OnSurfaceVariant)
+        }
+        ModernControlButton(
+            onClick = onAudioOutputChange,
+            icon = audioIcon,
+            contentDescription = audioDesc,
+            size = 50.dp,
+            tint = audioTint
+        )
+
+        Spacer(modifier = Modifier.width(12.dp))
+
         // 静音（统一风格）
         ModernControlButton(
             onClick = onMute,
-            icon = if (isMuted) "🔇" else "🔊",
+            icon = if (isMuted) "🔇" else "🔈",
             contentDescription = if (isMuted) "取消静音" else "静音",
             size = 50.dp
         )
@@ -280,7 +465,8 @@ private fun ModernControlButton(
     onClick: () -> Unit,
     icon: String,
     contentDescription: String?,
-    size: Dp
+    size: Dp,
+    tint: Color = OnSurfaceVariant  // 添加tint参数，默认为灰色
 ) {
     Surface(
         onClick = onClick,
@@ -296,7 +482,7 @@ private fun ModernControlButton(
             Text(
                 text = icon,
                 fontSize = 24.sp,
-                color = OnSurfaceVariant
+                color = tint
             )
         }
     }

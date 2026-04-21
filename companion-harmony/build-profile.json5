@@ -1,0 +1,68 @@
+{
+  "app": {
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\weiwu\\.ohos\\config\\default_companion-harmony_E-sSB1yHvobFQ_BfnZCQCA707i7QvLOGuO2ckt_EMmw=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001B7B3688EC12D9B0B9B34612AE46A13BA58634A357A4187C198BD7D7D31EA96BCCCAEFB7E82FDD97",
+          "profile": "C:\\Users\\weiwu\\.ohos\\config\\default_companion-harmony_E-sSB1yHvobFQ_BfnZCQCA707i7QvLOGuO2ckt_EMmw=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\weiwu\\.ohos\\config\\default_companion-harmony_E-sSB1yHvobFQ_BfnZCQCA707i7QvLOGuO2ckt_EMmw=.p12",
+          "storePassword": "0000001BDF5CE8BAC38996AAB09DD1E1058C331A0C14CACC9C9EC6813A6D88B9302BDA0F8297622CF11FC2"
+        }
+      }
+    ],
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        "compileSdkVersion": "6.0.2(22)",
+        "targetSdkVersion": "6.0.2(22)",
+        "compatibleSdkVersion": "6.0.2(22)",
+        "runtimeOS": "OpenHarmony",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ],
+    "capabilities": [
+      {
+        "bundleName": "com.example.fscastremote",
+        "config": [
+          {
+            "name": "Push Kit",
+            "capability": "com.huawei.service.push.base_service"
+          }
+        ]
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -18,13 +18,13 @@ val OnSecondary = Color(0xFFFFFFFF)
 val SecondaryContainer = Color(0xFFFFD6E8)
 val OnSecondaryContainer = Color(0xFF31111D)
 
-// 背景色 - 更现代的深色背景
-val Background = Color(0xFF0F172A)     // Slate 900
-val OnBackground = Color(0xFFF1F5F9)   // Slate 100
+// 背景色 - 更现代的深色背景（增强对比度，提升强光下可读性）
+val Background = Color(0xFF0B1120)     // 更深的背景（Slate 950）
+val OnBackground = Color(0xFFF8FAFC)   // 更亮的文字（Slate 50）
 val Surface = Color(0xFF1E293B)        // Slate 800
-val OnSurface = Color(0xFFF1F5F9)
+val OnSurface = Color(0xFFF8FAFC)      // 更亮的表面文字
 val SurfaceVariant = Color(0xFF334155) // Slate 700
-val OnSurfaceVariant = Color(0xFF94A3B8) // Slate 400
+val OnSurfaceVariant = Color(0xFFCBD5E1) // 更亮的次要文字（Slate 300）
 
 // 状态色
 val Success = Color(0xFF10B981)        // Emerald 500
@@ -61,3 +61,22 @@ val ios_blue = Color(0xFF007AFF)
 val ios_red = Color(0xFFFF3B30)
 val ios_green = Color(0xFF34C759)
 val ios_orange = Color(0xFFFF9500)
+
+// ==================== 黑金配色方案 ====================
+
+// 黑色系（背景）
+val GoldBackground = Color(0xFF0B1120)        // 深黑背景
+val GoldSurface = Color(0xFF1A1A2E)           // 卡片背景
+val GoldSurfaceVariant = Color(0xFF252540)    // 次要表面
+
+// 金色系（强调色）
+val GoldPrimary = Color(0xFFD4AF37)           // 主金色
+val GoldLight = Color(0xFFE5C558)             // 浅金色
+val GoldDark = Color(0xFFB8941F)              // 深金色
+val OnGold = Color(0xFF0B1120)                // 金色上的文字
+
+// 文字颜色
+val GoldOnBackground = Color(0xFFF5F5F5)      // 主文字（白金色）
+val GoldOnSurface = Color(0xFFE8E8E8)         // 表面文字
+val GoldOnSurfaceVariant = Color(0xFFA0A0A0)  // 次要文字（灰色）
+val GoldText = Color(0xFFD4AF37)              // 金色强调文字

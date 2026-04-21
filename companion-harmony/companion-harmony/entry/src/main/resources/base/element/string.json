@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "app_name",
+      "value": "FSCast Remote"
+    },
+    {
+      "name": "connection_status_connected",
+      "value": "已连接"
+    },
+    {
+      "name": "connection_status_disconnected",
+      "value": "未连接"
+    },
+    {
+      "name": "connection_status_connecting",
+      "value": "连接中"
+    }
+  ]
+}

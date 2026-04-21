@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "harmonyos-docs": {
+      "command": "python",
+      "args": [
+        "D:/project/HarmonyOS-docs/mcp_server/harmonyos_docs_remote_client.py"
+      ],
+      "cwd": "D:/project/HarmonyOS-docs",
+      "env": {
+        "PYTHONPATH": "D:/project/HarmonyOS-docs"
+      }
+    }
+  }
+}

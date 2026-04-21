@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+IconPark Home图标（outline主题）
+从 https://iconpark.oceanengine.com/ 自动生成
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#E8E8E8"
+        android:pathData="M9 18V42H39V18L24 6L9 18Z"/>
+    <path
+        android:fillColor="#E8E8E8"
+        android:pathData="M19 29V42H29V29H19Z"/>
+    <path
+        android:fillColor="#E8E8E8"
+        android:pathData="M9 42H39"/>
+</vector>

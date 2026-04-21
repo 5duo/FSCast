@@ -33,4 +33,15 @@
         <item name="cardBackgroundColor">@color/ios_card_background</item>
         <item name="cardElevation">0dp</item>
     </style>
+
+    <!-- 启动主题 - 用于防止黑屏 -->
+    <style name="Theme.FloatingScreenCasting.Splash" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- 启动背景 -->
+        <item name="android:windowBackground">@drawable/splash_background</item>
+        <!-- 状态栏透明 -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">false</item>
+        <!-- 全屏 -->
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="o_mr1">shortEdges</item>
+    </style>
 </resources>

@@ -19,9 +19,12 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.example.floatingscreencasting.cache.VideoCacheManager
+import com.example.floatingscreencasting.events.PlaybackEndEvent
 import com.example.floatingscreencasting.R
 import com.example.floatingscreencasting.databinding.PresentationVideoBinding
 import com.example.floatingscreencasting.history.PlaybackHistoryManager
+import com.example.floatingscreencasting.utils.UriUtils
+import org.greenrobot.eventbus.EventBus
 import java.net.CookieManager
 
 /**
@@ -41,8 +44,22 @@ class VideoPresentation(
     // 音频路由管理器
     private var audioRouteManager: com.example.floatingscreencasting.audio.AudioRouteManager? = null
 
+    // 同步服务器（用于与手机端同步播放状态）
+    private var syncServer: com.example.floatingscreencasting.data.remote.sync.SyncServer? = null
+
     // 播放历史管理器
     private val historyManager: PlaybackHistoryManager = PlaybackHistoryManager.getInstance(outerContext)
+
+    // 🔧 修复内存泄漏：Handler 成员变量
+    private val historySaveHandler = Handler(Looper.getMainLooper())
+    private val historySaveRunnable = object : Runnable {
+        override fun run() {
+            if (isPlaying()) {
+                updatePlaybackHistory()
+            }
+            historySaveHandler.postDelayed(this, 10000)
+        }
+    }
 
     // 静音状态
     private var isMuted = true
@@ -52,6 +69,10 @@ class VideoPresentation(
 
     // 当前播放URL的Referer
     private var currentReferer: String = ""
+
+    // 当前视频的元数据
+    private var currentTitle: String = ""
+    private var currentDurationMs: Long = 0
 
     // 用户设置的透明度（用于非播放状态）
     private var userAlpha: Float = 1.0f
@@ -273,10 +294,11 @@ class VideoPresentation(
 
         // 重要：使用outerContext（MainActivity的Context）而不是Presentation的context
         // 这样ExoPlayer可以正确继承Activity的音频配置和路由
-        exoPlayer = ExoPlayer.Builder(outerContext)
+        val playerBuilder = ExoPlayer.Builder(outerContext)
             .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(audioAttributes, true)  // true = handleAudioFocus
-            .build()
+
+        exoPlayer = playerBuilder.build()
             .apply {
                 android.util.Log.d("VideoPresentation", "将ExoPlayer绑定到PlayerView")
                 binding.playerView.player = this
@@ -310,6 +332,15 @@ class VideoPresentation(
                                 android.util.Log.d("VideoPresentation", "播放结束")
                                 // 播放结束，显示等待提示
                                 binding.waitingContainer.isVisible = true
+
+                                // 发送播放结束事件到MainActivity
+                                try {
+                                    val currentPosition = currentPosition
+                                    EventBus.getDefault().post(PlaybackEndEvent(currentPosition))
+                                    android.util.Log.d("VideoPresentation", "已发送播放结束事件，位置: ${currentPosition}ms")
+                                } catch (e: Exception) {
+                                    android.util.Log.e("VideoPresentation", "发送播放结束事件失败", e)
+                                }
                             }
                             Player.STATE_BUFFERING -> {
                                 android.util.Log.d("VideoPresentation", "缓冲中...")
@@ -363,18 +394,17 @@ class VideoPresentation(
                     }
                 })
 
-                // 定期保存播放进度（每10秒）
-                Handler(Looper.getMainLooper()).postDelayed(object : Runnable {
-                    override fun run() {
-                        if (isPlaying()) {
-                            updatePlaybackHistory()
-                        }
-                        Handler(Looper.getMainLooper()).postDelayed(this, 10000)
-                    }
-                }, 10000)
+                // 🔧 修复内存泄漏：使用成员变量启动定期保存播放进度（每10秒）
+                historySaveHandler.postDelayed(historySaveRunnable, 10000)
             }
 
         android.util.Log.d("VideoPresentation", "ExoPlayer创建完成: $exoPlayer")
+
+        // 启动同步服务器（用于与手机端同步播放状态）
+        syncServer = com.example.floatingscreencasting.data.remote.sync.SyncServer()
+        syncServer?.start()
+        android.util.Log.d("VideoPresentation", "SyncServer已启动")
+
         android.util.Log.d("VideoPresentation", "========== initializePlayer完成 ==========")
     }
 
@@ -382,10 +412,21 @@ class VideoPresentation(
      * 播放媒体
      */
     fun playMedia(uri: String) {
+        playMedia(uri, "", 0, 0)
+    }
+
+    fun playMedia(uri: String, title: String, durationMs: Long) {
+        playMedia(uri, title, durationMs, 0)
+    }
+
+    fun playMedia(uri: String, title: String, durationMs: Long, initialPositionMs: Long) {
         android.util.Log.d("VideoPresentation", "========== playMedia开始 ==========")
         android.util.Log.d("VideoPresentation", "playMedia被调用，uri长度: ${uri.length}")
         android.util.Log.d("VideoPresentation", "当前URI: ${currentUri.take(50)}...")
         android.util.Log.d("VideoPresentation", "新URI: ${uri.take(50)}...")
+        android.util.Log.d("VideoPresentation", "视频标题: $title")
+        android.util.Log.d("VideoPresentation", "视频时长: ${durationMs}ms")
+        android.util.Log.d("VideoPresentation", "初始位置: ${initialPositionMs}ms")
         android.util.Log.d("VideoPresentation", "isPlaying: ${isPlaying()}")
 
         // 检查是否是相同的URL（恢复播放）
@@ -417,13 +458,13 @@ class VideoPresentation(
             Handler(Looper.getMainLooper()).postDelayed({
                 if (exoPlayer != null) {
                     android.util.Log.d("VideoPresentation", "ExoPlayer已初始化，继续播放")
-                    doPlayMedia(uri)
+                    doPlayMedia(uri, title, durationMs, initialPositionMs)
                 } else {
                     android.util.Log.e("VideoPresentation", "ExoPlayer初始化超时！")
                 }
             }, 500)
         } else {
-            doPlayMedia(uri)
+            doPlayMedia(uri, title, durationMs, initialPositionMs)
         }
     }
 
@@ -431,10 +472,22 @@ class VideoPresentation(
      * 实际执行播放
      */
     private fun doPlayMedia(uri: String) {
-        // 保存当前播放的URL
+        doPlayMedia(uri, "", 0, 0)
+    }
+
+    private fun doPlayMedia(uri: String, title: String, durationMs: Long) {
+        doPlayMedia(uri, title, durationMs, 0)
+    }
+
+    private fun doPlayMedia(uri: String, title: String, durationMs: Long, initialPositionMs: Long) {
+        // 保存当前播放的URL和元数据
         currentUri = uri
+        currentTitle = title
+        currentDurationMs = durationMs
         android.util.Log.d("VideoPresentation", "doPlayMedia: 开始实际播放")
         android.util.Log.d("VideoPresentation", "完整URL: $uri")
+        android.util.Log.d("VideoPresentation", "视频标题: $title")
+        android.util.Log.d("VideoPresentation", "视频时长: ${durationMs}ms")
 
         // 尝试取消A2DP静音（需要root权限）
         audioRouteManager?.setA2DPMuted(false)
@@ -447,12 +500,12 @@ class VideoPresentation(
         // 处理特殊平台的URL签名
         val finalUri = when {
             // 检测是否为Bilibili URL
-            com.example.floatingscreencasting.dlna.BilibiliWbiSigner.isBilibiliUrl(uri) -> {
+            com.example.floatingscreencasting.data.remote.signer.BilibiliWbiSigner.isBilibiliUrl(uri) -> {
                 android.util.Log.d("VideoPresentation", "========== 检测到Bilibili URL，开始WBI签名处理 ==========")
                 try {
                     // BilibiliWbiSigner.fixBilibiliUrl是suspend函数，需要使用runBlocking调用
                     val fixedUrl = kotlinx.coroutines.runBlocking {
-                        com.example.floatingscreencasting.dlna.BilibiliWbiSigner.fixBilibiliUrl(uri)
+                        com.example.floatingscreencasting.data.remote.signer.BilibiliWbiSigner.fixBilibiliUrl(uri)
                     }
                     android.util.Log.d("VideoPresentation", "Bilibili URL已处理")
                     android.util.Log.d("VideoPresentation", "原始URL: $uri")
@@ -467,7 +520,7 @@ class VideoPresentation(
             uri.contains("iqiyi.com") || uri.contains("qiyi.com") -> {
                 android.util.Log.d("VideoPresentation", "检测到爱奇艺URL，尝试修复签名")
                 // 尝试修复签名
-                com.example.floatingscreencasting.dlna.IqiyiSigner.fixIqiyiUrl(uri)
+                com.example.floatingscreencasting.data.remote.signer.IqiyiSigner.fixIqiyiUrl(uri)
             }
             // 其他URL直接使用
             else -> uri
@@ -476,8 +529,8 @@ class VideoPresentation(
         android.util.Log.d("VideoPresentation", "最终使用的URL: ${if (finalUri != uri) "已修复签名" else "原始URL"}")
 
         // 保存播放记录
-        val title = extractTitleFromUri(finalUri)
-        historyManager.savePlayback(finalUri, title, 0, 0)
+        val historyTitle = if (currentTitle.isNotBlank()) currentTitle else UriUtils.extractTitleFromUri(finalUri)
+        historyManager.savePlayback(finalUri, historyTitle, 0, 0)
 
         // 获取对应平台的请求头
         val headers = getHeadersForUrl(finalUri)
@@ -506,17 +559,20 @@ class VideoPresentation(
 
         // 重要：使用outerContext（MainActivity的Context）而不是Presentation的context
         // 这样ExoPlayer可以正确继承Activity的音频配置和路由
-        exoPlayer = ExoPlayer.Builder(outerContext)
+        val playerBuilder = ExoPlayer.Builder(outerContext)
             .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(audioAttributes, true)  // true = handleAudioFocus
-            .build()
+
+        exoPlayer = playerBuilder.build()
             .apply {
                 // 根据静音状态设置音量
                 volume = if (isMuted) 0f else 1f
                 android.util.Log.d("VideoPresentation", "ExoPlayer音量: ${if (isMuted) 0 else 1}, 静音状态: $isMuted")
 
+                // 显示PlayerView并绑定ExoPlayer
+                binding.playerView.isVisible = true
                 binding.playerView.player = this
-                android.util.Log.d("VideoPresentation", "ExoPlayer已绑定到PlayerView")
+                android.util.Log.d("VideoPresentation", "PlayerView已显示并绑定ExoPlayer")
 
                 // 添加状态监听器
                 addListener(object : Player.Listener {
@@ -597,22 +653,44 @@ class VideoPresentation(
                     }
                 })
 
-                // 定期保存播放进度（每10秒）
-                Handler(Looper.getMainLooper()).postDelayed(object : Runnable {
-                    override fun run() {
-                        if (isPlaying()) {
-                            updatePlaybackHistory()
-                        }
-                        Handler(Looper.getMainLooper()).postDelayed(this, 10000)
-                    }
-                }, 10000)
+                // 🔧 修复内存泄漏：使用成员变量启动定期保存播放进度（每10秒）
+                // 先移除之前的回调，避免重复
+                historySaveHandler.removeCallbacks(historySaveRunnable)
+                historySaveHandler.postDelayed(historySaveRunnable, 10000)
             }
 
         // 准备并播放
         exoPlayer?.apply {
-            val mediaItem = MediaItem.fromUri(finalUri)
+            // 创建MediaItem，设置元数据
+            val mediaItemBuilder = MediaItem.Builder()
+                .setUri(finalUri)
+
+            // 如果有标题和时长，设置到MediaMetadata中
+            if (currentTitle.isNotBlank() || currentDurationMs > 0) {
+                val metadataBuilder = androidx.media3.common.MediaMetadata.Builder()
+                    if (currentTitle.isNotBlank()) {
+                        metadataBuilder.setTitle(currentTitle)
+                    }
+                    if (currentDurationMs > 0) {
+                        // 注意：ExoPlayer的时长以毫秒为单位
+                        // 但MediaMetadata.Duration通常用微秒，这里不设置duration，只设置title
+                        // 播放器会自动获取时长
+                    }
+                val mediaMetadata = metadataBuilder.build()
+                mediaItemBuilder.setMediaMetadata(mediaMetadata)
+                android.util.Log.d("VideoPresentation", "已设置MediaMetadata - 标题: $currentTitle")
+            }
+
+            val mediaItem = mediaItemBuilder.build()
             setMediaItem(mediaItem)
             prepare()
+
+            // 如果有初始位置，seek到该位置
+            if (initialPositionMs > 0) {
+                android.util.Log.d("VideoPresentation", "Seek到初始位置: ${initialPositionMs}ms")
+                seekTo(initialPositionMs)
+            }
+
             play()
             android.util.Log.d("VideoPresentation", "ExoPlayer已开始播放")
             android.util.Log.d("VideoPresentation", "是否正在播放: $isPlaying")
@@ -752,6 +830,25 @@ class VideoPresentation(
     }
 
     /**
+     * 获取当前视频标题
+     */
+    fun getCurrentTitle(): String {
+        return currentTitle
+    }
+
+    /**
+     * 获取当前视频时长（毫秒）
+     */
+    fun getCurrentDurationMs(): Long {
+        // 优先使用已保存的时长
+        if (currentDurationMs > 0) {
+            return currentDurationMs
+        }
+        // 否则从播放器获取
+        return exoPlayer?.duration ?: 0L
+    }
+
+    /**
      * 跳转到指定位置
      */
     fun seekTo(positionMs: Long) {
@@ -759,9 +856,35 @@ class VideoPresentation(
     }
 
     /**
+     * 处理来自手机端的远程控制命令
+     */
+    fun handleRemoteCommand(action: String, params: Map<String, Any>) {
+        android.util.Log.d("VideoPresentation", "远程命令: $action $params")
+        when (action) {
+            "play" -> play()
+            "pause" -> pause()
+            "stop" -> {
+                stop()
+                resetToInitialState()
+            }
+            "seek" -> {
+                val positionMs = (params["position_ms"] as? Number)?.toLong() ?: 0
+                seekTo(positionMs)
+            }
+        }
+    }
+
+    /**
      * 释放播放器资源
      */
     private fun releasePlayer() {
+        // 🔧 修复内存泄漏：移除Handler的所有回调
+        historySaveHandler.removeCallbacks(historySaveRunnable)
+
+        // 停止同步服务器
+        syncServer?.stop()
+        syncServer = null
+
         exoPlayer?.release()
         exoPlayer = null
     }
@@ -819,24 +942,28 @@ class VideoPresentation(
         val duration = player.duration
 
         if (duration > 0) {
-            val title = extractTitleFromUri(currentUri)
+            val title = UriUtils.extractTitleFromUri(currentUri)
             historyManager.updateProgress(currentUri, currentPosition, duration)
             android.util.Log.d("VideoPresentation", "更新播放历史: $title, 进度: ${currentPosition / 1000}s / ${duration / 1000}s")
         }
+
+        // 同步播放进度到手机端
+        syncProgress()
     }
 
     /**
-     * 从URI中提取标题
+     * 同步播放进度到手机端
      */
-    private fun extractTitleFromUri(uri: String): String {
-        return when {
-            uri.contains("bilibili") -> "哔哩哔哩"
-            uri.contains("iqiyi") -> "爱奇艺"
-            uri.contains("v.qq.com") -> "腾讯视频"
-            uri.contains("youku") -> "优酷"
-            uri.contains("mgtv") -> "芒果TV"
-            else -> "在线视频"
-        }
+    private fun syncProgress() {
+        val player = exoPlayer ?: return
+
+        syncServer?.broadcast(
+            com.example.floatingscreencasting.data.remote.sync.SyncServer.SyncMessage.Progress(
+                position = player.currentPosition,
+                duration = player.duration,
+                isPlaying = player.isPlaying
+            )
+        )
     }
 
     /**
@@ -852,4 +979,5 @@ class VideoPresentation(
     fun hasContinueWatching(): Boolean {
         return historyManager.hasContinueWatching()
     }
+
 }

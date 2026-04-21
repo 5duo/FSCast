@@ -254,11 +254,11 @@ private fun ModernSliderTrack(
 }
 
 /**
- * 改进的滑块行组件
+ * 改进的滑块行组件（使用Material Icons）
  */
 @Composable
 fun ModernSliderRow(
-    icon: String,
+    imageVector: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
     value: Int,
     valueRange: IntRange,
@@ -277,9 +277,11 @@ fun ModernSliderRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
-                Text(
-                    text = icon,
-                    style = MaterialTheme.typography.titleMedium
+                MaterialIcon(
+                    imageVector = imageVector,
+                    contentDescription = label,
+                    iconSize = 20.dp,
+                    tint = OnSurface
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(

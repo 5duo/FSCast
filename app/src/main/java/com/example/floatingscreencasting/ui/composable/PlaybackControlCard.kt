@@ -22,11 +22,13 @@ fun PlaybackControlCard(
     currentPosition: Long,
     duration: Long,
     isMuted: Boolean,
+    localAudioTest: Boolean,  // 本地音频测试模式
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onMute: () -> Unit,
+    onToggleLocalAudio: () -> Unit,  // 切换本地音频测试
     onSeek: (Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -54,11 +56,13 @@ fun PlaybackControlCard(
             PlaybackControls(
                 isPlaying = isPlaying,
                 isMuted = isMuted,
+                localAudioTest = localAudioTest,
                 onPlayPause = onPlayPause,
                 onStop = onStop,
                 onPrevious = onPrevious,
                 onNext = onNext,
-                onMute = onMute
+                onMute = onMute,
+                onToggleLocalAudio = onToggleLocalAudio
             )
         }
     }
@@ -117,11 +121,13 @@ private fun PlaybackProgressBar(
 private fun PlaybackControls(
     isPlaying: Boolean,
     isMuted: Boolean,
+    localAudioTest: Boolean,
     onPlayPause: () -> Unit,
     onStop: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
-    onMute: () -> Unit
+    onMute: () -> Unit,
+    onToggleLocalAudio: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -178,6 +184,22 @@ private fun PlaybackControls(
                 MaterialTheme.colorScheme.onSurfaceVariant
             } else {
                 MaterialTheme.colorScheme.primary
+            }
+        )
+
+        Spacer(modifier = Modifier.width(10.dp))
+
+        // 本地音频测试
+        ControlButton(
+            onClick = onToggleLocalAudio,
+            text = "🔊🚗",
+            modifier = Modifier.size(50.dp),
+            contentDescription = "本地音频测试",
+            fontSize = 14.sp,
+            tint = if (localAudioTest) {
+                Color(0xFF10B981)  // 绿色表示测试模式开启
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
             }
         )
     }

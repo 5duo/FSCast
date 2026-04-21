@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+IconPark Connection图标（outline主题）
+从 https://iconpark.oceanengine.com/ 自动生成
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#E8E8E8"
+        android:pathData="M39 34L44 39L39 44"/>
+    <path
+        android:fillColor="#E8E8E8"
+        android:pathData="M8 12C10.2091 12 12 10.2091 12 8C12 5.79086 10.2091 4 8 4C5.79086 4 4 5.79086 4 8C4 10.2091 5.79086 12 8 12Z"/>
+    <path
+        android:fillColor="#E8E8E8"
+        android:pathData="M12 8L20 8C22.2091 8 24 9.79086 24 12V35C24 37.2091 25.7909 39 28 39H44"/>
+</vector>

@@ -1,0 +1,36 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "FSCast Remote - 车机投屏音频传输助手"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "FSCast Remote 主界面"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "FSCast Remote"
+    },
+    {
+      "name": "app_name",
+      "value": "FSCast Remote"
+    },
+    {
+      "name": "internet_reason",
+      "value": "用于连接车机并传输音频数据"
+    },
+    {
+      "name": "network_reason",
+      "value": "用于发现和连接同一WiFi网络下的车机设备"
+    },
+    {
+      "name": "background_reason",
+      "value": "用于在后台持续播放来自车机的音频流"
+    },
+    {
+      "name": "download_reason",
+      "value": "用于下载视频文件到系统Download目录"
+    }
+  ]
+}

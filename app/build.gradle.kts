@@ -46,11 +46,11 @@ android {
             }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "17"
         freeCompilerArgs += listOf(
             "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api"
         )
@@ -88,6 +88,9 @@ dependencies {
     // OkHttp (用于视频缓存)
     implementation(libs.okhttp)
 
+    // Gson
+    implementation(libs.gson)
+
     // ConstraintLayout
     implementation(libs.constraintlayout)
 
@@ -103,11 +106,20 @@ dependencies {
     implementation(libs.lifecycle.viewmodel)
 
     // Serialization
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation(libs.kotlinx.serialization.json)
 
     // NanoHTTPD (DLNA HTTP服务器)
     implementation(libs.nanohttpd)
     implementation(libs.nanohttpd.webserver)
+
+    // Java-WebSocket (WebSocket服务器)
+    implementation(libs.java.websocket)
+
+    // Material Design Icons Extended
+    implementation(libs.compose.material.icons.extended)
+
+    // ZXing (二维码生成)
+    implementation(libs.zxing.core)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

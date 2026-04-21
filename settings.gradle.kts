@@ -21,4 +21,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "FloatingScreenCasting"
 include(":app")
+include(":companion-android")
  

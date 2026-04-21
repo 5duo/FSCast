@@ -22,7 +22,10 @@ import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.Player
 import com.example.floatingscreencasting.R
 import com.example.floatingscreencasting.databinding.ActivityMainBinding
-import com.example.floatingscreencasting.dlna.DlnaDmrService
+import com.example.floatingscreencasting.dlna.AudioOutputController
+import com.example.floatingscreencasting.dlna.PhoneDeviceManager
+import com.example.floatingscreencasting.data.remote.dlna.DlnaControlPoint
+import com.example.floatingscreencasting.data.remote.dlna.DlnaRendererService
 import com.example.floatingscreencasting.events.MuteEvent
 import com.example.floatingscreencasting.presentation.VideoPresentation
 import kotlinx.coroutines.launch
@@ -50,7 +53,13 @@ class MainActivity : AppCompatActivity() {
     private val drivingDisplayId = 2
 
     // DLNA服务
-    private lateinit var dlnaService: DlnaDmrService
+    private lateinit var dlnaService: DlnaRendererService
+
+    // 音频输出控制器
+    private lateinit var audioOutputController: AudioOutputController
+    private lateinit var dlnaDmcClient: DlnaControlPoint
+    private lateinit var phoneDeviceManager: PhoneDeviceManager
+    private lateinit var webSocketServer: com.example.floatingscreencasting.websocket.CarWebSocketServer
 
     // 当前选中的比例
     private var currentAspectRatio = "16:9"
@@ -165,6 +174,9 @@ class MainActivity : AppCompatActivity() {
 
         // 初始化静音按钮状态
         updateMuteButton()
+
+        // 初始化音频输出控制器
+        initializeAudioOutputController()
 
         // 初始化并启动DLNA服务
         initializeDlnaService()
@@ -491,6 +503,7 @@ class MainActivity : AppCompatActivity() {
             if (it.playbackState != Player.STATE_IDLE) {
                 val currentPosition = it.currentPosition
                 val duration = it.duration
+                val isPlaying = it.isPlaying
 
                 if (duration > 0) {
                     binding.progressSlider.valueTo = duration.toFloat()
@@ -499,6 +512,7 @@ class MainActivity : AppCompatActivity() {
                     binding.currentPositionText.text = formatTime(currentPosition)
                     binding.durationText.text = formatTime(duration)
                 }
+                // 注意：进度同步由AudioOutputController内部的定时器自动处理，不需要在这里调用
             }
         }
     }
@@ -673,10 +687,93 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
+     * 初始化音频输出控制器
+     */
+    private fun initializeAudioOutputController() {
+        // 初始化WebSocket服务器（在后台线程启动）
+        webSocketServer = com.example.floatingscreencasting.websocket.CarWebSocketServer(8080)
+        Thread {
+            try {
+                webSocketServer.start()
+                Log.i("MainActivity", "WebSocket服务器已启动，监听端口8080")
+            } catch (e: Exception) {
+                Log.e("MainActivity", "WebSocket服务器启动失败", e)
+            }
+        }.start()
+
+        // 初始化DLNA DMC客户端（用于发现和控制手机设备）
+        dlnaDmcClient = DlnaControlPoint(this)
+
+        // 初始化手机设备管理器
+        phoneDeviceManager = PhoneDeviceManager(this)
+
+        // 初始化音频输出控制器（传入WebSocket服务器）
+        audioOutputController = AudioOutputController(dlnaDmcClient, phoneDeviceManager, webSocketServer)
+
+        // 设置静音控制回调
+        audioOutputController.setMuteControlCallback(object : AudioOutputController.MuteControlCallback {
+            override fun setMuted(muted: Boolean) {
+                // 通知VideoPresentation静音/取消静音
+                videoPresentation?.setMuted(muted)
+                Log.d("MainActivity", "音频输出控制器请求静音: $muted")
+            }
+        })
+
+        // 设置播放状态监听器
+        audioOutputController.setPlaybackStateListener(object : AudioOutputController.PlaybackStateListener {
+            override fun onPlay() {
+                videoPresentation?.play()
+            }
+
+            override fun onPause() {
+                videoPresentation?.pause()
+            }
+
+            override fun onSeek(positionMs: Long) {
+                videoPresentation?.seekTo(positionMs)
+            }
+
+            override fun onStop() {
+                videoPresentation?.stop()
+            }
+
+            override fun getCurrentPosition(): Long {
+                return videoPresentation?.getExoPlayer()?.currentPosition ?: 0L
+            }
+        })
+
+        // 启动DLNA DMC客户端（开始发现手机设备）
+        dlnaDmcClient.start()
+
+        // 监听WebSocket连接状态
+        webSocketServer.onClientConnected = { clientId ->
+            Log.i("MainActivity", "手机端已连接: $clientId")
+            runOnUiThread {
+                Toast.makeText(this, "FSCast Remote已连接", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        webSocketServer.onClientDisconnected = { clientId ->
+            Log.i("MainActivity", "手机端已断开: $clientId")
+            runOnUiThread {
+                Toast.makeText(this, "FSCast Remote已断开", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        // 监听设备列表变化
+        dlnaDmcClient.onDeviceListChanged = { devices ->
+            phoneDeviceManager.updateDevices(devices)
+            Log.d("MainActivity", "发现 ${devices.size} 个DLNA设备")
+        }
+
+        Log.d("MainActivity", "音频输出控制器初始化完成")
+    }
+
+    /**
      * 初始化DLNA服务
      */
     private fun initializeDlnaService() {
-        dlnaService = DlnaDmrService.getInstance(this)
+        dlnaService = DlnaRendererService.getInstance(this)
 
         dlnaService.apply {
             onCastingStateChanged = { isCasting, title ->
@@ -687,11 +784,17 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this@MainActivity, error, Toast.LENGTH_SHORT).show()
             }
 
-            onPlayMedia = { uri ->
+            onPlayMedia = { uri, httpHeaders ->
+                // 保存当前视频URI和HTTP头到音频输出控制器
+                audioOutputController.setCurrentVideoUri(uri, httpHeaders)
+
+                // 播放视频
                 videoPresentation?.playMedia(uri)
                 if (uri.isNotEmpty()) {
                     dlnaService.updateTransportState("PLAYING")
                 }
+
+                Log.d("MainActivity", "DLNA投屏: URI长度=${uri.length}, HTTP头数量=${httpHeaders.size}")
             }
 
             onStopMedia = {
@@ -772,9 +875,22 @@ class MainActivity : AppCompatActivity() {
             Log.e("MainActivity", "取消注册EventBus失败", e)
         }
 
+        // 停止WebSocket服务器
+        try {
+            if (::webSocketServer.isInitialized) {
+                webSocketServer.stop()
+            }
+        } catch (e: Exception) {
+            Log.e("MainActivity", "停止WebSocket服务器失败", e)
+        }
+
         lifecycleScope.launch {
             dlnaService.stop()
         }
+
+        // 停止并释放音频输出控制器
+        audioOutputController.release()
+        dlnaDmcClient.stop()
 
         displayManager.unregisterDisplayListener(displayListener)
         videoPresentation?.dismiss()
