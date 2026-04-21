@@ -234,7 +234,10 @@ class ComposeMainActivity : AppCompatActivity() {
 
         // 后台异步初始化所有服务
         lifecycleScope.launch(Dispatchers.IO) {
-            // 初始化音频输出控制器
+            // 初始化DLNA服务（必须先初始化，因为audioOutputController需要它）
+            initializeDlnaService()
+
+            // 初始化音频输出控制器（需要dlnaService已初始化）
             initializeAudioOutputController()
 
             // 初始化显示器
@@ -242,9 +245,6 @@ class ComposeMainActivity : AppCompatActivity() {
 
             // 加载设置
             loadSettings()
-
-            // 初始化DLNA服务
-            initializeDlnaService()
 
             // 更新继续观看状态
             updateContinueWatchingStatus()
@@ -409,19 +409,42 @@ class ComposeMainActivity : AppCompatActivity() {
 
     /**
      * 切换音频输出
+     * - WebSocket已连接：speaker -> phone -> bilibili -> speaker（三种模式）
+     * - WebSocket未连接：speaker <-> bilibili（两种模式切换）
      */
     private fun toggleAudioOutput() {
         Log.i("ComposeMainActivity", "========================================")
         Log.i("ComposeMainActivity", "toggleAudioOutput: 当前模式=${uiState.value.audioOutputMode}")
         lifecycleScope.launch {
             val currentMode = uiState.value.audioOutputMode
-            val newMode = if (currentMode == "speaker") "phone" else "speaker"
+            val hasWebSocketConnection = uiState.value.webSocketClientCount > 0
+
+            Log.i("ComposeMainActivity", "WebSocket连接状态: ${if (hasWebSocketConnection) "已连接" else "未连接"}")
+
+            // 根据WebSocket连接状态决定切换逻辑
+            val newMode = if (hasWebSocketConnection) {
+                // WebSocket已连接：三种模式循环
+                when (currentMode) {
+                    "speaker" -> "phone"
+                    "phone" -> "bilibili"
+                    "bilibili" -> "speaker"
+                    else -> "speaker"
+                }
+            } else {
+                // WebSocket未连接：只切换speaker和bilibili
+                when (currentMode) {
+                    "speaker" -> "bilibili"
+                    "bilibili" -> "speaker"
+                    "phone" -> "speaker"  // 如果当前是phone模式（连接断开了），切换回speaker
+                    else -> "speaker"
+                }
+            }
 
             Log.i("ComposeMainActivity", "切换音频输出: $currentMode -> $newMode")
 
             // 切换音频输出模式
             val success = if (newMode == "phone") {
-                // 切换到手机端
+                // 切换到手机端（需要检查视频是否在播放）
                 Log.i("ComposeMainActivity", "调用switchOutputMode(PHONE)")
                 // 检查是否有正在播放的视频（使用uiState而不是audioOutputController，确保状态同步）
                 val currentUrl = uiState.value.currentVideoUrl
@@ -445,6 +468,12 @@ class ComposeMainActivity : AppCompatActivity() {
                 audioOutputController.switchOutputMode(
                     AudioOutputController.OutputMode.PHONE
                 )
+            } else if (newMode == "bilibili") {
+                // 切换到原源模式（不需要检查视频播放状态）
+                Log.i("ComposeMainActivity", "调用switchOutputMode(BILIBILI)")
+                audioOutputController.switchOutputMode(
+                    AudioOutputController.OutputMode.BILIBILI
+                )
             } else {
                 // 切换到车机扬声器
                 Log.i("ComposeMainActivity", "调用switchOutputMode(SPEAKER)")
@@ -457,9 +486,14 @@ class ComposeMainActivity : AppCompatActivity() {
             if (success) {
                 _uiState.value = uiState.value.copy(audioOutputMode = newMode)
                 withContext(Dispatchers.Main) {
+                    val toastMessage = when (newMode) {
+                        "phone" -> "音频输出已切换到手机端"
+                        "bilibili" -> "原源模式已激活"
+                        else -> "音频输出已切换到车机扬声器"
+                    }
                     Toast.makeText(
                         this@ComposeMainActivity,
-                        if (newMode == "phone") "音频输出已切换到手机端" else "音频输出已切换到车机扬声器",
+                        toastMessage,
                         Toast.LENGTH_SHORT
                     ).show()
                 }
@@ -1139,8 +1173,13 @@ class ComposeMainActivity : AppCompatActivity() {
             startWebSocketMonitor()
         }
 
-        // 初始化音频输出控制器（传入WebSocket服务器）
-        audioOutputController = AudioOutputController(dlnaDmcClient, phoneDeviceManager, webSocketServer)
+        // 初始化音频输出控制器（传入WebSocket服务器和DLNA服务）
+        audioOutputController = AudioOutputController(
+            dlnaDmcClient,
+            phoneDeviceManager,
+            webSocketServer,
+            dlnaService  // 传入DLNA服务用于控制HTTP服务器
+        )
 
         // 设置静音控制回调
         audioOutputController.setMuteControlCallback(object : AudioOutputController.MuteControlCallback {
@@ -1180,6 +1219,23 @@ class ComposeMainActivity : AppCompatActivity() {
         dlnaDmcClient.start()
 
         Log.d("ComposeMainActivity", "音频输出控制器初始化完成")
+
+        // 🔧 检查默认音频输出模式，如果是bilibili模式，则初始化Stop拦截和静音
+        val defaultMode = uiState.value.audioOutputMode
+        Log.i("ComposeMainActivity", "检查默认音频输出模式: $defaultMode")
+        if (defaultMode == "bilibili") {
+            Log.i("ComposeMainActivity", "========================================")
+            Log.i("ComposeMainActivity", "默认模式为原源模式，执行初始化")
+            Log.i("ComposeMainActivity", "1. 开启Stop命令拦截")
+            Log.i("ComposeMainActivity", "2. 设置Stop拦截回调（暂停4秒后恢复）")
+            Log.i("ComposeMainActivity", "3. 静音车机端")
+            Log.i("ComposeMainActivity", "========================================")
+
+            // 开启Stop命令拦截
+            audioOutputController.switchOutputMode(AudioOutputController.OutputMode.BILIBILI)
+
+            Log.i("ComposeMainActivity", "原源模式初始化完成")
+        }
     }
 
     private fun initializeDlnaService() {

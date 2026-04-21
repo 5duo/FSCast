@@ -59,10 +59,13 @@ export class CarWebSocketClient {
   private onPauseCommandCallback: (() => void) | null = null
   private onStopCommandCallback: (() => void) | null = null
   private onSeekCommandCallback: ((position: number) => void) | null = null
-  private onProgressUpdateCallback: ((position: number, duration: number, isPlaying: boolean) => void) | null = null
+  // ⏱️ 时间戳对齐：添加sendTime参数
+  private onProgressUpdateCallback: ((position: number, duration: number, isPlaying: boolean, sendTime: number) => void) | null = null
   private onDisconnectedCallback: (() => void) | null = null  // 连接断开回调
   private onConnectedCallback: (() => void) | null = null  // 连接成功回调
   private onConnectionStatusChangeCallback: ((isConnected: boolean) => void) | null = null  // 连接状态变化回调
+  // ⏱️ 时间校准：服务器时间回调（用于计算系统时间偏移）
+  private onServerTimeCallback: ((serverTime: number) => void) | null = null
 
   /**
    * 连接到车机端
@@ -191,7 +194,19 @@ export class CarWebSocketClient {
           break
 
         case 'welcome':
+          // ⏱️ 时间校准：提取服务器时间戳用于计算系统时间偏移
           hilog.info(DOMAIN, TAG, '收到欢迎消息')
+          if (data) {
+            const serverTime = (data as Record<string, Object>)['timestamp'] as number
+            if (serverTime) {
+              hilog.info(DOMAIN, TAG, `⏱️ 服务器时间戳: ${serverTime}`)
+              this.onServerTimeCallback?.(serverTime)
+            } else {
+              hilog.warn(DOMAIN, TAG, 'welcome消息中缺少timestamp字段')
+            }
+          } else {
+            hilog.warn(DOMAIN, TAG, 'welcome消息中缺少data字段')
+          }
           break
 
         default:
@@ -343,27 +358,33 @@ export class CarWebSocketClient {
         break
 
       case 'pause':
+        hilog.info(DOMAIN, TAG, `收到pause命令，调用回调`)
         this.onPauseCommandCallback?.()
         break
 
       case 'stop':
+        hilog.info(DOMAIN, TAG, `收到stop命令，调用回调`)
         this.onStopCommandCallback?.()
         break
 
       case 'seek':
+        hilog.info(DOMAIN, TAG, `收到seek命令`)
         if (data) {
           const position = (data as Record<string, Object>)['position'] as number
+          hilog.info(DOMAIN, TAG, `seek位置: ${position}ms`)
           this.onSeekCommandCallback?.(position)
         }
         break
 
       case 'progress':
+        // ⏱️ 时间戳对齐：传递sendTime字段
         if (data) {
           const dataRecord = data as Record<string, Object>
           const pos = dataRecord['position'] as number
           const dur = dataRecord['duration'] as number
           const playing = dataRecord['isPlaying'] as boolean
-          this.onProgressUpdateCallback?.(pos, dur, playing)
+          const sendTime = dataRecord['sendTime'] as number || Date.now()  // 兼容旧版本
+          this.onProgressUpdateCallback?.(pos, dur, playing, sendTime)
         }
         break
 
@@ -649,7 +670,13 @@ export class CarWebSocketClient {
     this.onSeekCommandCallback = callback
   }
 
-  setOnProgressUpdate(callback: (position: number, duration: number, isPlaying: boolean) => void): void {
+  // ⏱️ 时间戳对齐：添加sendTime参数到setter
+  setOnProgressUpdate(callback: (position: number, duration: number, isPlaying: boolean, sendTime: number) => void): void {
     this.onProgressUpdateCallback = callback
+  }
+
+  // ⏱️ 时间校准：设置服务器时间回调
+  setOnServerTime(callback: (serverTime: number) => void): void {
+    this.onServerTimeCallback = callback
   }
 }

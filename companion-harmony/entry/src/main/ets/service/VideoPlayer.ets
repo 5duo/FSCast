@@ -1,9 +1,10 @@
 /**
  * 视频播放器
- * 鸿蒙手机端DLNA DMR - 使用AVPlayer播放HTTP视频流
+ * FSCast Remote - 使用AVPlayer播放HTTP视频流
  * 支持视频+音频播放和进度同步，支持后台播放
  */
 import media from '@ohos.multimedia.media'
+import audio from '@ohos.multimedia.audio'
 import { hilog } from '@kit.PerformanceAnalysisKit'
 import { BusinessError } from '@kit.BasicServicesKit'
 
@@ -21,30 +22,58 @@ export class VideoPlayer {
   // 进度同步优化相关
   private isPhoneMode: boolean = false
   private seekDebounceTimer: number = -1
-  private readonly SEEK_DEBOUNCE_DELAY = 300
+  private readonly SEEK_DEBOUNCE_DELAY = 1000  // 1秒防抖延迟
+  private hasStartedPlaying: boolean = false  // 新增：标志视频是否已经开始播放过
+
+  // 倍速播放相关（基于官方文档）
+  currentSpeed: media.PlaybackSpeed = media.PlaybackSpeed.SPEED_FORWARD_1_00_X
+  private speedSyncPromise: Promise<void> | null = null
+
+  // 缓冲进度相关（基于官方流媒体文档）
+  currentBufferTime: number = 0  // 已缓冲时长（毫秒）
+  private isBuffering: boolean = false
+
+  // 平滑同步状态（基于官方倍速API）
+  syncState: 'synced' | 'catching_up' | 'seeking' = 'synced'
 
   // 事件回调
-  private onPositionUpdate: ((position: number) => void) | null = null
-  private onPlaybackStateChanged: ((isPlaying: boolean) => void) | null = null
-  private onCompletion: (() => void) | null = null
+  onPositionUpdate: ((position: number) => void) | null = null
+  onPlaybackStateChanged: ((isPlaying: boolean) => void) | null = null
+  onCompletion: (() => void) | null = null
 
   /**
    * 初始化播放器
+   * 注意：不在这里设置surfaceId，而是在play()方法中设置
    */
   async initialize(surfaceId: string): Promise<void> {
+    // 如果AVPlayer已经存在且正在播放，不重新初始化
+    if (this.avPlayer && (this.isPlaying || this.currentPosition > 0)) {
+      hilog.info(DOMAIN, TAG, 'VideoPlayer已经初始化且正在播放，更新SurfaceID')
+      this.surfaceId = surfaceId
+      return
+    }
+
+    // 如果AVPlayer存在但未播放，先释放再重新创建
+    if (this.avPlayer) {
+      hilog.info(DOMAIN, TAG, '释放旧的VideoPlayer实例')
+      try {
+        await this.avPlayer.release()
+      } catch (error) {
+        hilog.warn(DOMAIN, TAG, `释放旧VideoPlayer失败: ${JSON.stringify(error)}`)
+      }
+      this.avPlayer = null
+    }
+
     this.surfaceId = surfaceId
 
     try {
       // 创建AVPlayer实例
       this.avPlayer = await media.createAVPlayer()
 
-      // 设置事件监听
+      // 设置事件监听（必须在设置资源之前）
       this.setupEventListeners()
 
-      // 设置Surface
-      this.avPlayer.surfaceId = surfaceId
-
-      hilog.info(DOMAIN, TAG, 'VideoPlayer initialized')
+      hilog.info(DOMAIN, TAG, 'VideoPlayer创建成功，等待播放时设置Surface')
     } catch (error) {
       hilog.error(DOMAIN, TAG, `Initialize failed: ${JSON.stringify(error)}`)
       throw new Error(`VideoPlayer initialization failed: ${JSON.stringify(error)}`)
@@ -65,8 +94,26 @@ export class VideoPlayer {
 
       if (state === 'playing') {
         this.isPlaying = true
+        this.hasStartedPlaying = true  // 标记视频已开始播放
+        hilog.info(DOMAIN, TAG, `视频开始播放，允许进度同步`)
       } else if (state === 'paused' || state === 'stopped') {
         this.isPlaying = false
+      } else if (state === 'prepared') {
+        // 🆕 关键修复：在prepared状态设置SurfaceID
+        hilog.info(DOMAIN, TAG, `AVPlayer进入prepared状态，设置SurfaceID: ${this.surfaceId}`)
+        if (this.surfaceId.length > 0 && this.avPlayer) {
+          this.avPlayer.surfaceId = this.surfaceId
+          hilog.info(DOMAIN, TAG, `SurfaceID已设置，现在可以播放`)
+        }
+
+        // 自动开始播放
+        if (this.avPlayer) {
+          this.avPlayer.play().then(() => {
+            hilog.info(DOMAIN, TAG, '自动播放开始')
+          }).catch((error: Error) => {
+            hilog.error(DOMAIN, TAG, `自动播放失败: ${error.message}`)
+          })
+        }
       }
 
       this.onPlaybackStateChanged?.(this.isPlaying)
@@ -98,6 +145,46 @@ export class VideoPlayer {
     this.avPlayer.on('error', (error: BusinessError) => {
       hilog.error(DOMAIN, TAG, `Player error: ${JSON.stringify(error)}`)
       hilog.error(DOMAIN, TAG, `Error code: ${error.code}, message: ${error.message}`)
+    })
+
+    // 倍速设置完成监听（基于官方文档）
+    this.avPlayer.on('speedDone', (speed: media.PlaybackSpeed) => {
+      this.currentSpeed = speed
+      hilog.info(DOMAIN, TAG, `倍速已切换: ${speed}`)
+    })
+
+    // 缓冲进度监听（基于官方流媒体文档）
+    this.avPlayer.on('bufferingUpdate', (infoType: media.BufferingInfoType, value: number) => {
+      hilog.debug(DOMAIN, TAG, `bufferingUpdate: ${infoType}, ${value}`)
+
+      if (infoType === media.BufferingInfoType.CACHED_DURATION) {
+        // 已缓冲时长（毫秒）
+        this.currentBufferTime = this.currentPosition + value
+      } else if (infoType === media.BufferingInfoType.BUFFERING_START) {
+        this.isBuffering = true
+        hilog.info(DOMAIN, TAG, '开始缓冲')
+      } else if (infoType === media.BufferingInfoType.BUFFERING_END) {
+        this.isBuffering = false
+        hilog.info(DOMAIN, TAG, '缓冲结束')
+      }
+    })
+
+    // seek完成监听（用于精确同步）
+    this.avPlayer.on('seekDone', (seekDoneTime: number) => {
+      hilog.info(DOMAIN, TAG, `seek完成: ${seekDoneTime}ms`)
+      this.currentPosition = seekDoneTime
+      // 触发UI更新回调
+      this.onPositionUpdate?.(seekDoneTime)
+    })
+
+    // 音量变化监听
+    this.avPlayer.on('volumeChange', (volume: number) => {
+      hilog.debug(DOMAIN, TAG, `音量变化: ${volume}`)
+    })
+
+    // 音频焦点中断监听
+    this.avPlayer.on('audioInterrupt', (interruptEvent: audio.InterruptEvent) => {
+      hilog.info(DOMAIN, TAG, `音频中断: ${JSON.stringify(interruptEvent)}`)
     })
   }
 
@@ -150,16 +237,13 @@ export class VideoPlayer {
         this.avPlayer.url = uri
       }
 
-      // 等待播放器准备好后再设置音量和播放
-      // 先调用play()，播放器会自动准备
-      await this.avPlayer.play()
-      hilog.info(DOMAIN, TAG, 'play()已调用')
+      // ⚠️ 重要：不在此时设置SurfaceID
+      // SurfaceID必须在AVPlayer进入initialized状态后才能设置
+      // 会在stateChange监听中，当状态变为prepared时设置
 
-      // 现在设置音量（播放器已准备好）
-      this.avPlayer.setVolume(1.0)
-      hilog.info(DOMAIN, TAG, '设置音量: 1.0')
+      // 等待AVPlayer准备好后再播放
+      hilog.info(DOMAIN, TAG, '等待AVPlayer准备...')
 
-      hilog.info(DOMAIN, TAG, `Playing: ${uri.substring(0, 100)}...`)
     } catch (error) {
       hilog.error(DOMAIN, TAG, `Play failed: ${JSON.stringify(error)}`)
       hilog.error(DOMAIN, TAG, `Error code: ${JSON.stringify((error as Record<string, Object>).code)}`)
@@ -229,9 +313,9 @@ export class VideoPlayer {
     }
 
     // 只有在视频真正开始播放后才允许同步
-    // 如果currentPosition为0，说明视频还没开始播放，不要同步
-    if (this.currentPosition === 0) {
-      hilog.debug(DOMAIN, TAG, `视频未开始播放(currentPosition=0)，忽略进度同步`)
+    // 使用hasStartedPlaying标志而不是currentPosition检查
+    if (!this.hasStartedPlaying) {
+      hilog.debug(DOMAIN, TAG, `视频尚未开始播放，忽略进度同步`)
       return
     }
 
@@ -370,5 +454,129 @@ export class VideoPlayer {
     this.isPlaying = false
     this.currentPosition = 0
     hilog.info(DOMAIN, TAG, 'Released')
+  }
+
+  /**
+   * 设置播放倍速（基于官方文档 bpta-avplayer-basic-control）
+   * @param speed 播放速度枚举
+   */
+  async setPlaybackSpeed(speed: media.PlaybackSpeed): Promise<void> {
+    if (!this.avPlayer) {
+      hilog.warn(DOMAIN, TAG, 'AVPlayer未初始化，无法设置倍速')
+      return
+    }
+
+    try {
+      this.currentSpeed = speed
+      await this.avPlayer.setSpeed(speed)
+      hilog.info(DOMAIN, TAG, `倍速设置: ${speed}`)
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, `倍速设置失败: ${JSON.stringify(error)}`)
+    }
+  }
+
+  /**
+   * 获取当前倍速
+   */
+  getCurrentSpeed(): media.PlaybackSpeed {
+    return this.currentSpeed
+  }
+
+  /**
+   * 获取当前缓冲时长
+   */
+  getCurrentBufferTime(): number {
+    return this.currentBufferTime
+  }
+
+  /**
+   * 是否正在缓冲
+   */
+  getIsBuffering(): boolean {
+    return this.isBuffering
+  }
+
+  /**
+   * 获取同步状态
+   */
+  getSyncState(): 'synced' | 'catching_up' | 'seeking' {
+    return this.syncState
+  }
+
+  /**
+   * 平滑同步方法（基于VideoTogether时间戳对齐算法）
+   * 根据进度差异自动选择合适的同步策略
+   * @param carPosition 车机端位置（毫秒）
+   * @param carSendTime 车机端发送时间（毫秒，可选）
+   */
+  syncWithSmoothSpeed(carPosition: number, carSendTime?: number): void {
+    // 如果未开始播放，不执行同步
+    if (!this.hasStartedPlaying) {
+      hilog.debug(DOMAIN, TAG, '视频尚未开始播放，跳过平滑同步')
+      return
+    }
+
+    // 时间戳对齐：计算车机当前的真实位置
+    let alignedCarPosition = carPosition
+    if (carSendTime) {
+      const currentTime = Date.now()
+      const networkDelay = currentTime - carSendTime
+      alignedCarPosition = carPosition + networkDelay
+      hilog.debug(DOMAIN, TAG, `时间戳对齐: 车机发送=${carPosition}ms, 延迟=${networkDelay}ms, 对齐后=${alignedCarPosition}ms`)
+    }
+
+    const diff = alignedCarPosition - this.currentPosition  // 毫秒（正数=落后，负数=超前）
+    const absDiff = Math.abs(diff)
+
+    if (absDiff < 1000) {
+      // 🎯 误差<1秒：已同步，正常播放
+      this.setPlaybackSpeed(media.PlaybackSpeed.SPEED_FORWARD_1_00_X)
+      this.syncState = 'synced'
+      // 每10秒输出一次状态
+      if (Date.now() % 10000 < 3000) {
+        hilog.debug(DOMAIN, TAG, `✅ 同步正常: 差异${Math.floor(diff)}ms`)
+      }
+    } else if (absDiff < 3000) {
+      // 🎯 误差1-3秒：微调倍速追赶（1.25x）
+      if (diff > 0) {
+        this.setPlaybackSpeed(media.PlaybackSpeed.SPEED_FORWARD_1_25_X)
+        this.syncState = 'catching_up'
+        hilog.info(DOMAIN, TAG, `🚀 微调追赶: 落后${Math.floor(diff)}ms, 使用1.25x`)
+      } else {
+        this.setPlaybackSpeed(media.PlaybackSpeed.SPEED_FORWARD_1_00_X)
+        this.syncState = 'synced'
+        hilog.info(DOMAIN, TAG, `⏸️ 手机超前${Math.floor(Math.abs(diff))}ms, 等待车机`)
+      }
+    } else if (absDiff < 10000) {
+      // 🎯 误差3-10秒：中等倍速追赶（1.75x）
+      if (diff > 0) {
+        this.setPlaybackSpeed(media.PlaybackSpeed.SPEED_FORWARD_1_75_X)
+        this.syncState = 'catching_up'
+        hilog.info(DOMAIN, TAG, `🚀 中等追赶: 落后${Math.floor(diff)}ms, 使用1.75x`)
+      } else {
+        this.setPlaybackSpeed(media.PlaybackSpeed.SPEED_FORWARD_1_00_X)
+        this.syncState = 'synced'
+      }
+    } else if (absDiff < 20000) {
+      // 🎯 误差10-20秒：高速追赶（2.0x）
+      if (diff > 0) {
+        this.setPlaybackSpeed(media.PlaybackSpeed.SPEED_FORWARD_2_00_X)
+        this.syncState = 'catching_up'
+        hilog.info(DOMAIN, TAG, `🚀 高速追赶: 落后${Math.floor(diff)}ms, 使用2.0x`)
+      } else {
+        this.setPlaybackSpeed(media.PlaybackSpeed.SPEED_FORWARD_1_00_X)
+        this.syncState = 'synced'
+      }
+    } else {
+      // 🎯 误差>20秒：强制seek对齐（最后手段）
+      this.syncState = 'seeking'
+      const seekTarget = alignedCarPosition
+
+      hilog.info(DOMAIN, TAG, `⚡ 强制对齐(最后手段): 差异${Math.floor(diff)}ms, seek到${Math.floor(seekTarget / 1000)}s`)
+
+      this.seek(seekTarget).then(() => {
+        hilog.info(DOMAIN, TAG, `✅ 强制对齐完成`)
+      })
+    }
   }
 }

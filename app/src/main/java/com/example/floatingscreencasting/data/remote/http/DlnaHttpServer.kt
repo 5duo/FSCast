@@ -6,6 +6,7 @@ import kotlinx.coroutines.*
 import org.xml.sax.InputSource
 import java.io.StringReader
 import java.net.InetAddress
+import java.net.URL
 import javax.xml.parsers.DocumentBuilderFactory
 
 /**
@@ -29,7 +30,22 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
         private const val TAG = "DlnaHttpServer"
         // 固定设备UUID（伪装成小米电视）
         private const val DEVICE_UUID = "583f8100-1de2-11db-8981-000c298458a8"
+        private const val AVTRANSPORT_SERVICE_TYPE = "urn:schemas-upnp-org:service:AVTransport:1"
     }
+
+    // 事件订阅管理
+    private data class EventSubscription(
+        val callbackUrl: String,
+        val subscriptionId: String,
+        val timeout: Long = 1800  // 默认30分钟超时
+    )
+
+    private val eventSubscriptions = mutableMapOf<String, EventSubscription>()
+    private var subscriptionCounter = 0
+
+    // Stop命令拦截标志（用于原源模式）
+    @Volatile
+    private var interceptStopCommand: Boolean = false
 
     // 播放状态跟踪
     private var transportState: String = "STOPPED"
@@ -68,6 +84,7 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
     private var onStopCommand: (() -> Unit)? = null
     private var onPauseCommand: (() -> Unit)? = null
     private var onSeekCommand: ((String) -> Unit)? = null
+    private var onStopCommandIntercepted: (() -> Unit)? = null  // Stop命令被拦截时的回调
 
     // 获取播放状态的回调
     private var onGetDuration: (() -> Long)? = null
@@ -106,6 +123,22 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
      */
     fun setSeekCommand(callback: (String) -> Unit) {
         onSeekCommand = callback
+    }
+
+    /**
+     * 设置是否拦截Stop命令（用于原源模式）
+     * @param intercept true=拦截Stop命令并忽略，false=正常处理Stop命令
+     */
+    fun setStopCommandIntercept(intercept: Boolean) {
+        interceptStopCommand = intercept
+        Log.i(TAG, "Stop命令拦截状态: $intercept")
+    }
+
+    /**
+     * 设置Stop命令被拦截时的回调（用于暂停2秒后恢复播放）
+     */
+    fun setOnStopCommandIntercepted(callback: () -> Unit) {
+        onStopCommandIntercepted = callback
     }
 
     /**
@@ -384,30 +417,49 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
                 Log.d(TAG, "========== 收到Stop命令 ==========")
                 Log.d(TAG, "SOAPAction: $soapAction")
                 Log.d(TAG, "请求体: $body")
-                transportState = "STOPPED"
 
-                // 清空当前URI和metadata
-                currentUri = ""
-                currentMetadata = ""
-                metadataDurationSeconds = 0L
-                Log.d(TAG, "已清空当前URI和metadata")
+                // 检查是否拦截Stop命令（用于原源模式）
+                if (interceptStopCommand) {
+                    Log.i(TAG, "Stop命令被拦截（原源模式），触发暂停2秒后恢复的逻辑")
+                    // 调用回调处理暂停2秒后恢复的逻辑
+                    onStopCommandIntercepted?.invoke()
+                    // 返回成功响应，但不执行实际停止操作
+                    """
+                    <?xml version="1.0"?>
+                    <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+                               s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+                        <s:Body>
+                            <u:StopResponse xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"/>
+                        </s:Body>
+                    </s:Envelope>
+                    """.trimIndent()
+                } else {
+                    // 正常处理Stop命令
+                    transportState = "STOPPED"
 
-                CoroutineScope(Dispatchers.Main).launch {
-                    Log.d(TAG, "执行Stop命令回调")
-                    onStopCommand?.invoke()
-                    Log.d(TAG, "Stop命令回调执行完成")
+                    // 清空当前URI和metadata
+                    currentUri = ""
+                    currentMetadata = ""
+                    metadataDurationSeconds = 0L
+                    Log.d(TAG, "已清空当前URI和metadata")
+
+                    CoroutineScope(Dispatchers.Main).launch {
+                        Log.d(TAG, "执行Stop命令回调")
+                        onStopCommand?.invoke()
+                        Log.d(TAG, "Stop命令回调执行完成")
+                    }
+
+                    Log.d(TAG, "========== Stop命令处理完成 ==========")
+                    """
+                    <?xml version="1.0"?>
+                    <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+                               s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+                        <s:Body>
+                            <u:StopResponse xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"/>
+                        </s:Body>
+                    </s:Envelope>
+                    """.trimIndent()
                 }
-
-                Log.d(TAG, "========== Stop命令处理完成 ==========")
-                """
-                <?xml version="1.0"?>
-                <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
-                           s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-                    <s:Body>
-                        <u:StopResponse xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"/>
-                    </s:Body>
-                </s:Envelope>
-                """.trimIndent()
             }
 
             soapAction?.contains("#GetTransportInfo") == true -> {
@@ -823,11 +875,62 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
     }
 
     /**
-     * 处理连接命令
+     * 处理连接命令（包含SUBSCRIBE/UNSUBSCRIBE事件订阅）
      */
     private fun handleConnectionCommand(session: IHTTPSession): Response {
-        Log.d(TAG, "收到连接命令")
+        val method = session.method
+        val headers = session.headers
 
+        Log.d(TAG, "收到连接命令: $method")
+
+        // 处理SUBSCRIBE请求（事件订阅）
+        if (method.toString() == "SUBSCRIBE") {
+            val callback = headers["callback"] ?: headers["Callback"]
+            val nt = headers["nt"] ?: headers["NT"]
+
+            Log.d(TAG, "SUBSCRIBE请求 - Callback: $callback, NT: $nt")
+
+            if (callback != null) {
+                // 新订阅
+                val subscriptionId = "uuid:${System.currentTimeMillis()}-${subscriptionCounter++}"
+                val callbackUrl = callback.removeAngleBrackets()
+                val subscription = EventSubscription(callbackUrl, subscriptionId)
+                eventSubscriptions[subscriptionId] = subscription
+
+                Log.i(TAG, "新的事件订阅: $subscriptionId -> $callbackUrl")
+
+                val response = newFixedLengthResponse(Response.Status.OK, "text/plain", "")
+                response.addHeader("SID", subscriptionId)
+                response.addHeader("TIMEOUT", "Second-1800")
+                return response
+            } else if (headers.containsKey("sid")) {
+                // 续订
+                val sid = headers["sid"]
+                val subscription = eventSubscriptions[sid]
+
+                if (subscription != null) {
+                    Log.i(TAG, "续订事件: $sid")
+
+                    val response = newFixedLengthResponse(Response.Status.OK, "text/plain", "")
+                    response.addHeader("SID", sid)
+                    response.addHeader("TIMEOUT", "Second-1800")
+                    return response
+                } else {
+                    Log.w(TAG, "续订失败，找不到订阅: $sid")
+                    return newFixedLengthResponse(Response.Status.PRECONDITION_FAILED, "text/plain", "Invalid SID")
+                }
+            }
+        } else if (method.toString() == "UNSUBSCRIBE") {
+            // 取消订阅
+            val sid = headers["sid"]
+            if (sid != null) {
+                eventSubscriptions.remove(sid)
+                Log.i(TAG, "取消事件订阅: $sid")
+            }
+            return newFixedLengthResponse(Response.Status.OK, "text/plain", "")
+        }
+
+        // 默认响应
         val soapResponse = """
             <?xml version="1.0"?>
             <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
@@ -842,6 +945,85 @@ class DlnaHttpServer : NanoHTTPD("0.0.0.0", 49152) {
             "text/xml; charset=\"utf-8\"",
             soapResponse
         )
+    }
+
+    /**
+     * 发送事件通知给所有订阅者
+     * @param variables 要通知的变量及其值（如 "TransportState" to "STOPPED"）
+     */
+    fun notifyEvent(variables: Map<String, String>) {
+        if (eventSubscriptions.isEmpty()) {
+            Log.d(TAG, "没有事件订阅者，跳过通知")
+            return
+        }
+
+        // 构建事件消息
+        val body = buildEventMessage(variables)
+
+        Log.i(TAG, "发送事件通知给 ${eventSubscriptions.size} 个订阅者")
+
+        // 在后台线程发送通知
+        CoroutineScope(Dispatchers.IO).launch {
+            eventSubscriptions.values.forEach { subscription ->
+                try {
+                    sendEventToSubscriber(subscription, body)
+                } catch (e: Exception) {
+                    Log.e(TAG, "发送事件通知失败: ${subscription.callbackUrl}", e)
+                }
+            }
+        }
+    }
+
+    /**
+     * 构建事件消息
+     */
+    private fun buildEventMessage(variables: Map<String, String>): String {
+        val variablesXml = variables.entries.joinToString("\n") { (name, value) ->
+            """              <e:property>
+                            <m:$name xmlns:m="urn:schemas-upnp-org:service:AVTransport:1">$value</m:$name>
+                        </e:property>"""
+        }
+
+        return """
+            <?xml version="1.0"?>
+            <e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">
+            $variablesXml
+            </e:propertyset>
+        """.trimIndent()
+    }
+
+    /**
+     * 发送事件给单个订阅者
+     */
+    private fun sendEventToSubscriber(subscription: EventSubscription, body: String) {
+        try {
+            val url = URL(subscription.callbackUrl)
+            val connection = url.openConnection() as java.net.HttpURLConnection
+            connection.requestMethod = "NOTIFY"
+            connection.setRequestProperty("CONTENT-TYPE", "text/xml; charset=\"utf-8\"")
+            connection.setRequestProperty("NT", "upnp:event")
+            connection.setRequestProperty("NTS", "upnp:propchange")
+            connection.setRequestProperty("SID", subscription.subscriptionId)
+            connection.doOutput = true
+
+            Log.d(TAG, "发送事件通知到: ${subscription.callbackUrl}")
+            Log.d(TAG, "事件消息:\n$body")
+
+            connection.outputStream.use { it.write(body.toByteArray()) }
+            connection.inputStream.use { it.readBytes() }  // 等待响应
+
+            Log.d(TAG, "事件通知发送成功")
+        } catch (e: Exception) {
+            Log.e(TAG, "发送事件通知失败", e)
+            throw e
+        }
+    }
+
+    /**
+     * 辅助函数：去除尖括号
+     */
+    private fun String.removeAngleBrackets(): String {
+        return this.removePrefix("<").removeSuffix(">")
     }
 
     /**

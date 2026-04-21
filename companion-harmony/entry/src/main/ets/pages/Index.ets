@@ -1,7 +1,7 @@
 /**
  * FSCast Remote 主页面
- * DLNA DMR + 设备发现响应 + 同步客户端
- * UI重构：控制台风格，移除播放模式选择，统一状态管理
+ * 网络视频播放器 - 通过WebSocket接收播放命令
+ * 简洁UI：顶部状态栏 + 中央播放器
  */
 import { hilog } from '@kit.PerformanceAnalysisKit'
 import { preferences } from '@kit.ArkData'
@@ -11,12 +11,15 @@ import { pasteboard } from '@kit.BasicServicesKit'
 import { fileIo } from '@kit.CoreFileKit'
 import { common } from '@kit.AbilityKit'
 import { Environment } from '@kit.CoreFileKit'
+import media from '@ohos.multimedia.media'
 import { CarWebSocketClient } from '../service/CarWebSocketClient'
 import { VideoPlayer } from '../service/VideoPlayer'
 import { MediaSessionService } from '../service/MediaSessionService'
 import { BackgroundService } from '../service/BackgroundService'
-import { ConnectionStatusCard } from '../components/ConnectionStatusCard'
 import { VideoPlayerCard } from '../components/VideoPlayerCard'
+import { AVPlayerPlayerCard, getGlobalVideoPlayer } from '../components/AVPlayerPlayerCard'
+import { CarProgressCard } from '../components/CarProgressCard'
+import { LogCard } from '../components/LogCard'
 // import { VideoUrlCard } from '../components/VideoUrlCard'  // 已删除
 // import { ControlPanel } from '../components/ControlPanel'  // 已移除，功能整合到StatusPanel
 import { CarIpDialog } from '../components/CarIpDialog'
@@ -24,6 +27,13 @@ import { NetworkScanService } from '../service/NetworkScanService'
 
 const TAG = 'IndexPage'
 const DOMAIN = 0x0000
+
+// 日志条目接口（与LogCard组件保持一致）
+interface LogEntry {
+  timestamp: string
+  level: string
+  message: string
+}
 
 @Entry
 @Component
@@ -61,7 +71,11 @@ struct Index {
   private mainVideoController: VideoController = new VideoController()
   private lastSyncTime: number = 0  // 上次同步时间，用于防抖
   private lastSeekTime: number = 0  // 上次seek的时间戳
+  private lastSeekTargetPosition: number = 0  // 上次seek的目标位置
   @State phoneActualPosition: number = 0  // 手机端实际播放进度
+  private progressUpdateTimer: number = -1  // 进度更新定时器
+  private lastProgressUpdateTime: number = 0  // 上次进度更新时间戳
+  private lastProgressUpdatePosition: number = 0  // 上次进度更新时的位置
 
   // ===== WebSocket连接状态 =====
   @State webSocketConnected: boolean = false
@@ -90,6 +104,17 @@ struct Index {
   // 双向同步状态：是否在手机播放模式（已收到URI并正在播放）
   @State isPhoneMode: boolean = false
 
+  // ===== 车机端进度状态 =====
+  @State carPosition: number = 0  // 车机端播放位置（毫秒）
+  @State carDuration: number = 0  // 车机端视频总时长（毫秒）
+  @State carIsPlaying: boolean = false  // 车机端是否正在播放
+
+  // ===== UI日志状态 =====
+  @State appLogs: LogEntry[] = []
+
+  // ⏱️ 时间校准：系统时间偏移量（服务器时间 - 本地时间）
+  private timeOffset: number = 0
+
   aboutToAppear(): void {
     hilog.info(DOMAIN, TAG, '========================================')
     hilog.info(DOMAIN, TAG, 'Page aboutToAppear - 开始初始化')
@@ -99,11 +124,26 @@ struct Index {
     this.mediaSessionService.setContext(getContext(this))
     this.backgroundService.setContext(getContext(this))
 
+    // 设置VideoPlayer的进度更新回调（用于seek后更新UI）
+    this.videoPlayer.onPositionUpdate = (positionMs: number) => {
+      this.phoneActualPosition = positionMs / 1000  // 转换为秒
+      this.dlnaPosition = positionMs
+      hilog.debug(DOMAIN, TAG, `VideoPlayer进度更新: ${Math.floor(positionMs)}ms (${this.phoneActualPosition.toFixed(2)}s)`)
+    }
+
     // 初始化媒体会话（同步，快速返回）
     this.initializeMediaSession()
 
     // 启动定期状态检查（先启动，确保状态更新机制运行）
     this.startPeriodicStatusCheck()
+
+    // 🔧 禁用推算定时器，只使用Video组件的onUpdate返回的实际位置
+    // 推算会导致phoneActualPosition比实际视频画面快
+    // onUpdate的回调频率已经足够（约每250ms一次）
+    this.progressUpdateTimer = setInterval(() => {
+      // 空操作，保持定时器活跃但不推算位置
+      // 实际位置由onUpdate回调提供
+    }, 500)
 
     // ⚠️ 重要：异步初始化服务，不阻塞UI显示
     // UI会先显示默认状态，然后逐步更新
@@ -324,6 +364,17 @@ struct Index {
   private setupWebSocketCallbacks(): void {
     hilog.info(DOMAIN, TAG, '设置WebSocket命令回调')
 
+    // ⏱️ 时间校准：服务器时间回调（计算系统时间偏移）
+    this.carWebSocketClient.setOnServerTime((serverTime: number) => {
+      const clientTime = Date.now()
+      this.timeOffset = serverTime - clientTime
+
+      hilog.info(DOMAIN, TAG, `⏱️ 时间校准:`)
+      hilog.info(DOMAIN, TAG, `   服务器时间: ${serverTime}`)
+      hilog.info(DOMAIN, TAG, `   本地时间:   ${clientTime}`)
+      hilog.info(DOMAIN, TAG, `   时间偏移:   ${this.timeOffset}ms (${this.timeOffset > 0 ? '+' : ''}${(this.timeOffset / 1000).toFixed(2)}s)`)
+    })
+
     // 播放命令回调
     this.carWebSocketClient.setOnPlayCommand((uri: string, httpHeaders: Record<string, string>) => {
       hilog.info(DOMAIN, TAG, `========================================`)
@@ -350,6 +401,8 @@ struct Index {
       hilog.info(DOMAIN, TAG, `目标进度: ${position}ms (${Math.floor(position / 1000)}s)`)
       hilog.info(DOMAIN, TAG, `========================================`)
 
+      this.addLogInfo(`收到play_and_seek命令，目标进度: ${Math.floor(position / 1000)}s`)
+
       // 更新状态
       this.dlnaUri = uri
       this.dlnaHttpHeaders = httpHeaders
@@ -358,34 +411,77 @@ struct Index {
       this.isPhoneMode = true
       this.videoPlayer.setPhoneMode(true)
 
-      // 等待视频加载后跳转并暂停
-      hilog.info(DOMAIN, TAG, `等待视频加载...`)
+      // 🔧 特殊处理：目标进度为0时，需要等待视频真正开始播放后再暂停
+      if (position === 0) {
+        hilog.info(DOMAIN, TAG, `目标进度为0，等待视频开始播放后暂停`)
 
-      // 延迟1秒后跳转并暂停（给视频一些加载时间）
-      setTimeout(() => {
-        const positionSeconds = Math.floor(position / 1000)
-        hilog.info(DOMAIN, TAG, `跳转到 ${positionSeconds}s 并暂停`)
-        this.mainVideoController.setCurrentTime(positionSeconds)
-        this.mainVideoController.pause()
-
-        // 再延迟1秒确保暂停完成
+        // 等待2秒，确保视频已经开始播放
         setTimeout(() => {
-          hilog.info(DOMAIN, TAG, `视频已跳转到指定位置并暂停，等待车机端同时播放命令`)
-        }, 1000)
-      }, 1000)
+          hilog.info(DOMAIN, TAG, `视频应该已开始播放，现在暂停`)
+          this.mainVideoController.pause()
+          this.dlnaIsPlaying = false
+
+          setTimeout(() => {
+            hilog.info(DOMAIN, TAG, `视频已暂停，等待车机端同时播放命令`)
+          }, 500)
+        }, 2000)
+      } else {
+        // 目标进度不为0，等待视频加载后跳转并暂停
+        hilog.info(DOMAIN, TAG, `等待视频加载...`)
+
+        // 🔧 延迟2秒后跳转并暂停（和车机等待时间一致，给视频足够的加载时间）
+        setTimeout(() => {
+          const positionSeconds = Math.floor(position / 1000)
+          hilog.info(DOMAIN, TAG, `跳转到 ${positionSeconds}s 并暂停`)
+          this.mainVideoController.setCurrentTime(positionSeconds)
+          this.mainVideoController.pause()
+
+          // 记录基准位置，避免推算误差
+          this.lastProgressUpdateTime = Date.now()
+          this.lastProgressUpdatePosition = positionSeconds
+          this.phoneActualPosition = positionSeconds
+          this.lastSeekTime = Date.now()
+          this.lastSeekTargetPosition = positionSeconds
+
+          // 再延迟1秒确保暂停完成
+          setTimeout(() => {
+            hilog.info(DOMAIN, TAG, `视频已跳转到指定位置并暂停，等待车机端同时播放命令`)
+          }, 1000)
+        }, 2000)  // 🔧 改为2秒，和车机一致
+      }
     })
 
     // 恢复播放命令回调（resume）
     this.carWebSocketClient.setOnResumeCommand(() => {
       hilog.info(DOMAIN, TAG, `收到同时播放命令，开始播放`)
+      this.addLogInfo(`收到resume命令，同时开始播放`)
+
+      // 🔧 立即同步到车机的当前位置，补偿启动延迟
+      const carPositionSeconds = Math.floor(this.carPosition / 1000)
+      if (carPositionSeconds > 0 && Math.abs(this.phoneActualPosition - carPositionSeconds) > 2) {
+        hilog.info(DOMAIN, TAG, `🎯 启动时同步位置: ${this.phoneActualPosition}s → ${carPositionSeconds}s`)
+        this.mainVideoController.setCurrentTime(carPositionSeconds)
+        this.lastProgressUpdateTime = Date.now()
+        this.lastProgressUpdatePosition = carPositionSeconds
+        this.phoneActualPosition = carPositionSeconds
+        this.lastSeekTargetPosition = carPositionSeconds
+        this.lastSeekTime = Date.now()
+      }
+
       this.mainVideoController.start()
       this.dlnaIsPlaying = true
+      this.mainVideoPrepared = true  // 视频已准备，可以开始进度同步
+      hilog.info(DOMAIN, TAG, `视频准备完成，开始进度同步`)
     })
 
     // 暂停命令回调
     this.carWebSocketClient.setOnPauseCommand(() => {
       hilog.info(DOMAIN, TAG, `收到暂停命令`)
+      this.addLogInfo(`收到pause命令`)
       this.mainVideoController.pause()
+      // 🔧 重置推算基准值，避免暂停后推算错误
+      this.lastProgressUpdateTime = 0
+      this.lastProgressUpdatePosition = 0
     })
 
     // 停止命令回调
@@ -396,18 +492,88 @@ struct Index {
 
     // 跳转命令回调
     this.carWebSocketClient.setOnSeekCommand((position: number) => {
-      hilog.info(DOMAIN, TAG, `收到跳转命令: ${position}`)
-      this.mainVideoController.setCurrentTime(position)
-      this.dlnaPosition = position
+      const positionSeconds = Math.floor(position / 1000)
+      hilog.info(DOMAIN, TAG, `========================================`)
+      hilog.info(DOMAIN, TAG, `收到seek命令: ${position}ms -> ${positionSeconds}s`)
+      hilog.info(DOMAIN, TAG, `当前phoneActualPosition: ${this.phoneActualPosition}s`)
+      hilog.info(DOMAIN, TAG, `当前dlnaPosition: ${this.dlnaPosition}ms`)
+      hilog.info(DOMAIN, TAG, `========================================`)
+      this.addLogInfo(`收到seek命令: ${positionSeconds}s (当前${this.phoneActualPosition}s)`)
+
+      // 🔧 单位转换：VideoController.setCurrentTime() 需要秒为单位，而position是毫秒
+      const wasPlaying = this.dlnaIsPlaying
+
+      // 🔧 使用暂停→seek→恢复策略，确保seek准确完成
+      // 步骤1: 暂停（如果正在播放）
+      if (wasPlaying) {
+        this.mainVideoController.pause()
+        hilog.info(DOMAIN, TAG, `Seek步骤1: 已暂停 (当前播放状态: ${this.dlnaIsPlaying})`)
+      }
+
+      // 步骤2: 等待暂停完成后执行seek
+      setTimeout(() => {
+        hilog.info(DOMAIN, TAG, `Seek步骤2: 执行setCurrentTime(${positionSeconds})`)
+        this.mainVideoController.setCurrentTime(positionSeconds)
+
+        // 更新推算基准值
+        this.lastProgressUpdateTime = Date.now()
+        this.lastProgressUpdatePosition = positionSeconds
+        this.phoneActualPosition = positionSeconds
+        this.lastSeekTime = Date.now()
+        this.lastSeekTargetPosition = positionSeconds
+
+        hilog.info(DOMAIN, TAG, `Seek步骤2: 已设置phoneActualPosition=${positionSeconds}s, lastSeekTime=${this.lastSeekTime}`)
+
+        // 步骤3: 等待seek完成后恢复播放（如果之前在播放）
+        setTimeout(() => {
+          hilog.info(DOMAIN, TAG, `Seek步骤3: 恢复播放前 phoneActualPosition=${this.phoneActualPosition}s`)
+          if (wasPlaying) {
+            this.mainVideoController.start()
+            hilog.info(DOMAIN, TAG, `Seek步骤3: 已恢复播放`)
+          }
+          hilog.info(DOMAIN, TAG, `Seek完成，目标位置: ${positionSeconds}s, 实际: ${this.phoneActualPosition}s`)
+        }, 300)  // 等待300ms让seek完成
+      }, 100)  // 等待100ms让暂停完成
     })
 
     // 进度更新回调（状态优先级同步）
-    this.carWebSocketClient.setOnProgressUpdate((position: number, duration: number, isPlaying: boolean) => {
+    // ⏱️ 时间戳对齐算法：使用校准后的时间，补偿系统时间差异和网络延迟
+    // 🔧 推算车机实时进度：补偿消息到达后的播放延迟
+    this.carWebSocketClient.setOnProgressUpdate((position: number, duration: number, isPlaying: boolean, sendTime: number) => {
+      const clientTime = Date.now()
+      const calibratedTime = clientTime + this.timeOffset  // ⏱️ 校准为服务器时间
+      const networkDelay = calibratedTime - sendTime  // 真实网络延迟
+      const messageArrivalTime = sendTime + networkDelay  // 消息到达手机的时刻（按服务器时间）
+      const extraDelay = calibratedTime - messageArrivalTime  // 消息到达后到现在的额外延迟
+
+      // 🎯 推算车机当前真实进度
+      let carRealTimePosition = position + networkDelay  // 先补偿网络延迟
+      if (isPlaying) {
+        // 如果车机正在播放，需要再补偿消息到达后的播放时间
+        carRealTimePosition += extraDelay
+      }
+
       hilog.info(DOMAIN, TAG, `收到进度更新: ${position}/${duration}, playing=${isPlaying}, prepared=${this.mainVideoPrepared}`)
+      hilog.info(DOMAIN, TAG, `⏱️ 时间戳对齐:`)
+      hilog.info(DOMAIN, TAG, `   sendTime=${sendTime}`)
+      hilog.info(DOMAIN, TAG, `   本地时间=${clientTime}`)
+      hilog.info(DOMAIN, TAG, `   校准时间=${calibratedTime} (offset=${this.timeOffset}ms)`)
+      hilog.info(DOMAIN, TAG, `   网络延迟=${networkDelay}ms`)
+      hilog.info(DOMAIN, TAG, `   消息到达时间=${messageArrivalTime}`)
+      hilog.info(DOMAIN, TAG, `   额外延迟=${extraDelay}ms`)
+      hilog.info(DOMAIN, TAG, `   车机实时进度: ${position}ms + ${networkDelay}ms + ${isPlaying ? extraDelay + 'ms' : '0ms(暂停)'} = ${carRealTimePosition}ms`)
+
+      // 更新车机端进度状态（使用推算的实时进度）
+      this.carPosition = carRealTimePosition
+      this.carDuration = duration
+      this.carIsPlaying = isPlaying
 
       // 更新UI状态
-      this.dlnaPosition = position
+      this.dlnaPosition = carRealTimePosition  // 使用推算的实时进度
       this.dlnaDuration = duration
+
+      // 添加日志到日志卡片
+      this.addLogInfo(`车机进度: ${this.formatTimeShort(carRealTimePosition)}/${this.formatTimeShort(duration)}, ${isPlaying ? '播放中' : '已暂停'}`)
 
       // 【状态优先】先同步播放状态，再同步进度
       if (this.dlnaIsPlaying !== isPlaying) {
@@ -423,12 +589,77 @@ struct Index {
         this.dlnaIsPlaying = isPlaying
       }
 
-      // 然后同步进度（只在播放状态下）
-      if (isPlaying && this.mainVideoPrepared) {
-        // 使用VideoPlayer的同步机制（已优化：动态阈值、防抖、平滑seek）
-        this.videoPlayer.syncProgress(position, duration, isPlaying)
+      // 进度同步逻辑：根据使用VideoPlayerCard还是AVPlayerPlayerCard选择不同策略
+      const globalPlayer = getGlobalVideoPlayer()
+
+      if (globalPlayer && isPlaying && this.mainVideoPrepared) {
+        // 🆕 使用全局VideoPlayer平滑同步算法（基于VideoTogether时间戳对齐）
+        const currentPositionMs = this.phoneActualPosition * 1000
+        const diff = carRealTimePosition - currentPositionMs
+        const absDiff = Math.abs(diff)
+
+        hilog.info(DOMAIN, TAG, `🚀 平滑同步: phone=${Math.floor(currentPositionMs)}ms, car=${carRealTimePosition}ms, diff=${diff}ms`)
+
+        // 调用全局VideoPlayer的平滑同步方法（基于时间戳对齐）
+        globalPlayer.syncWithSmoothSpeed(carRealTimePosition, sendTime)
+
+        // 获取当前同步状态
+        const syncState = globalPlayer.getSyncState()
+        const currentSpeed = globalPlayer.getCurrentSpeed()
+
+        // 日志输出
+        if (absDiff < 1000) {
+          // 每10秒输出一次，避免日志过多
+          if (Date.now() % 10000 < 3000) {
+            this.addLogInfo(`✅ 已同步: 差异${Math.floor(diff)}ms, 倍速=${currentSpeed}`)
+          }
+        } else if (absDiff < 3000) {
+          this.addLogInfo(`🚀 微调追赶: ${syncState}, 差异${Math.floor(diff)}ms, 倍速=${currentSpeed}`)
+        } else if (absDiff < 10000) {
+          this.addLogInfo(`🚀 中等追赶: ${syncState}, 差异${Math.floor(diff)}ms, 倍速=${currentSpeed}`)
+        } else if (absDiff < 20000) {
+          this.addLogInfo(`🚀 高速追赶: ${syncState}, 差异${Math.floor(diff)}ms, 倍速=${currentSpeed}`)
+        } else {
+          this.addLogInfo(`⚡ 强制对齐: ${syncState}, 差异${Math.floor(diff)}ms`)
+        }
+      } else if (isPlaying && this.mainVideoPrepared) {
+        // 🔧 回退方案：VideoPlayerCard使用简单的seek同步
+        const currentPositionMs = this.phoneActualPosition * 1000
+        const diff = carRealTimePosition - currentPositionMs
+        const absDiff = Math.abs(diff)
+
+        // 只有差异>1秒才同步
+        if (absDiff > 1000) {
+          const targetSeconds = carRealTimePosition / 1000
+          hilog.info(DOMAIN, TAG, `🎯 简单同步: phone=${Math.floor(currentPositionMs)}ms, car=${carRealTimePosition}ms, diff=${diff}ms`)
+
+          // 暂停→seek→恢复策略
+          const wasPlaying = this.dlnaIsPlaying
+          if (wasPlaying) {
+            this.mainVideoController.pause()
+          }
+
+          setTimeout(() => {
+            this.mainVideoController.setCurrentTime(targetSeconds)
+            this.phoneActualPosition = targetSeconds
+            this.lastSeekTime = Date.now()
+            this.lastSeekTargetPosition = targetSeconds
+            hilog.info(DOMAIN, TAG, `已同步到: ${targetSeconds}s`)
+
+            setTimeout(() => {
+              if (wasPlaying) {
+                this.mainVideoController.start()
+              }
+            }, 300)
+          }, 100)
+
+          this.addLogInfo(`同步进度: ${this.formatTimeShort(carRealTimePosition)}`)
+        }
       } else {
-        hilog.debug(DOMAIN, TAG, '暂停状态下不执行进度同步')
+        hilog.info(DOMAIN, TAG, `暂停状态下不执行进度同步: isPlaying=${isPlaying}, prepared=${this.mainVideoPrepared}`)
+        if (!this.mainVideoPrepared) {
+          this.addLogInfo(`等待视频准备: isPlaying=${isPlaying}, prepared=${this.mainVideoPrepared}`)
+        }
       }
     })
 
@@ -731,6 +962,12 @@ struct Index {
     if (this.statusCheckTimer !== -1) {
       clearInterval(this.statusCheckTimer)
       this.statusCheckTimer = -1
+    }
+
+    // 🔧 清理进度更新定时器
+    if (this.progressUpdateTimer !== -1) {
+      clearInterval(this.progressUpdateTimer)
+      this.progressUpdateTimer = -1
     }
 
     this.cleanup()
@@ -1066,20 +1303,77 @@ struct Index {
     this.backgroundService.stop()
   }
 
+  // ==================== 日志辅助方法 ====================
+
+  /**
+   * 添加日志到UI
+   */
+  private addLogInfo(message: string) {
+    const now = new Date()
+    const timestamp = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`
+    this.appLogs.unshift({ timestamp, level: 'INFO', message })
+
+    // 限制日志数量
+    if (this.appLogs.length > 100) {
+      this.appLogs = this.appLogs.slice(0, 100)
+    }
+  }
+
+  private addLogWarn(message: string) {
+    const now = new Date()
+    const timestamp = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`
+    this.appLogs.unshift({ timestamp, level: 'WARN', message })
+
+    if (this.appLogs.length > 100) {
+      this.appLogs = this.appLogs.slice(0, 100)
+    }
+  }
+
+  private addLogError(message: string) {
+    const now = new Date()
+    const timestamp = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`
+    this.appLogs.unshift({ timestamp, level: 'ERROR', message })
+
+    if (this.appLogs.length > 100) {
+      this.appLogs = this.appLogs.slice(0, 100)
+    }
+  }
+
   // ==================== UI 构建 ====================
 
   build() {
-    Scroll() {
-      Column({ space: 12 }) {
-        // 连接状态卡片（独立显示）
-        ConnectionStatusCard({
-          webSocketConnected: this.webSocketConnected,
-          carIpAddress: this.carIpAddress,
-          localIpAddress: this.localIpAddress,
-          isRefreshing: this.isRefreshing,
-          scanProgress: this.scanProgressDetail,
-          onRefresh: async () => {
-            // 首先检查WiFi连接
+    Column() {
+      // 顶部状态栏（简洁）
+      Row() {
+        // 连接状态指示
+        Row({ space: 6 }) {
+          Circle()
+            .width(8)
+            .height(8)
+            .fill(this.webSocketConnected ? '#10B981' : '#64748B')
+
+          Text(this.webSocketConnected ? `已连接 ${this.carIpAddress}` : '未连接')
+            .fontSize(13)
+            .fontColor(this.webSocketConnected ? '#10B981' : '#64748B')
+        }
+
+        Blank()
+
+        // 刷新按钮
+        Button() {
+          Text('🔄')
+            .fontSize(14)
+            .fontColor('#CBD5E1')
+        }
+        .width(32)
+        .height(32)
+        .backgroundColor('#1E293B')
+        .borderRadius(6)
+        .type(ButtonType.Normal)
+        .enabled(!this.isRefreshing)
+        .opacity(this.isRefreshing ? 0.5 : 1.0)
+        .onClick(async () => {
+          if (!this.isRefreshing) {
             const hasWifi = await this.networkScanService.hasWifiConnection()
             if (!hasWifi) {
               this.autoScanProgress = '请先连接WiFi后重试'
@@ -1090,49 +1384,139 @@ struct Index {
               }, 3000)
               return
             }
-
-            // 重置扫描标记，允许重新扫描
             this.hasAttemptedAutoScan = false
-            // 启动自动扫描并重新连接
             await this.autoScanAndConnect()
           }
         })
-
-        // 视频播放器（有URI且WebSocket连接时显示）
-        if (this.dlnaUri.length > 0 && this.webSocketConnected) {
-          VideoPlayerCard({
-            dlnaUri: this.dlnaUri,
-            dlnaHttpHeaders: this.dlnaHttpHeaders,
-            dlnaIsPlaying: this.dlnaIsPlaying,
-            dlnaPosition: this.dlnaPosition,
-            dlnaDuration: this.dlnaDuration,
-            videoController: this.mainVideoController,
-            onPlayStateChange: (isPlaying: boolean) => {
-              this.dlnaIsPlaying = isPlaying
-            },
-            onProgressUpdate: (position: number, duration: number) => {
-              this.phoneActualPosition = position
-              this.dlnaDuration = duration
-            },
-            onCompletion: () => {
-              this.stopVideoAndClearState()
-            },
-            onError: (error: ESObject) => {
-              hilog.error(DOMAIN, TAG, `视频播放错误: ${JSON.stringify(error)}`)
-            }
-          })
-        }
-
-        Blank().height(16)
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 12, bottom: 20 })
+      .height(48)
+      .padding({ left: 16, right: 16 })
       .backgroundColor('#0F172A')
+
+      // 视频播放器（始终显示）- 临时使用VideoPlayerCard（调试AVPlayerPlayerCard崩溃问题）
+      if (this.dlnaUri.length > 0 && this.webSocketConnected) {
+        VideoPlayerCard({
+          dlnaUri: this.dlnaUri,
+          dlnaHttpHeaders: this.dlnaHttpHeaders,
+          dlnaIsPlaying: this.dlnaIsPlaying,
+          dlnaPosition: Math.floor(this.phoneActualPosition * 1000),  // 🔧 显示手机真实进度，而不是车机进度
+          dlnaDuration: this.dlnaDuration,
+          onControllerReady: (controller: VideoController) => {
+            // 保存VideoPlayerCard的controller引用，用于进度同步
+            this.mainVideoController = controller
+            hilog.info(DOMAIN, TAG, `VideoPlayerCard controller已准备`)
+          },
+          onPlayStateChange: (isPlaying: boolean) => {
+            this.dlnaIsPlaying = isPlaying
+            // 视频开始播放时，标记为已准备（用于进度同步）
+            if (isPlaying && !this.mainVideoPrepared) {
+              this.mainVideoPrepared = true
+              hilog.info(DOMAIN, TAG, `视频开始播放，准备完成，可以开始进度同步`)
+            }
+          },
+          onProgressUpdate: (position: number, duration: number) => {
+            const positionSeconds = position / 1000
+            // 🔧 seek 后 3秒内，严格过滤旧值，只接受大于等于目标位置的值
+            const timeSinceSeek = Date.now() - this.lastSeekTime
+            if (timeSinceSeek < 3000 && this.lastSeekTime > 0 && this.lastSeekTargetPosition > 0) {
+              if (positionSeconds < this.lastSeekTargetPosition) {
+                // 忽略比目标位置小的值（即使只差0.1秒）
+                hilog.info(DOMAIN, TAG, `❌ seek 后 ${timeSinceSeek}ms 忽略旧位置 ${positionSeconds}s < 目标 ${this.lastSeekTargetPosition}s`)
+                return
+              }
+              hilog.info(DOMAIN, TAG, `✅ seek 后 ${timeSinceSeek}ms 接受新位置: ${positionSeconds}s (≥ ${this.lastSeekTargetPosition}s)`)
+              // seek 后接受第一个大于等于目标位置的值时，重置 seek 标记
+              this.lastSeekTime = 0
+              this.lastSeekTargetPosition = 0
+            }
+
+            // 🔧 使用AVPlayer的实际位置
+            if (positionSeconds >= this.phoneActualPosition - 10) {
+              const oldPosition = this.phoneActualPosition
+              this.phoneActualPosition = positionSeconds
+              this.dlnaDuration = duration
+              this.lastProgressUpdateTime = Date.now()
+              this.lastProgressUpdatePosition = positionSeconds
+
+              // 如果位置变化超过1秒，记录日志
+              if (Math.abs(positionSeconds - oldPosition) > 1) {
+                hilog.info(DOMAIN, TAG, `📺 AVPlayer进度: ${oldPosition}s → ${positionSeconds}s`)
+              }
+            }
+          },
+          onCompletion: () => {
+            this.stopVideoAndClearState()
+          },
+          onError: (error: ESObject) => {
+            hilog.error(DOMAIN, TAG, `视频播放错误: ${JSON.stringify(error)}`)
+          }
+        })
+      } else {
+        // 等待占位符
+        Column() {
+          Text('🎬')
+            .fontSize(64)
+            .fontColor('#334155')
+            .margin({ bottom: 16 })
+
+          Text(this.webSocketConnected ? '等待视频...' : '等待连接...')
+            .fontSize(16)
+            .fontColor('#64748B')
+
+          if (!this.webSocketConnected && this.localIpAddress.length > 0) {
+            Text(`本机IP: ${this.localIpAddress}`)
+              .fontSize(13)
+              .fontColor('#475569')
+              .margin({ top: 8 })
+          }
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+        .backgroundColor('#0F172A')
+      }
+
+      // 车机端进度条（在视频播放器下方）
+      if (this.webSocketConnected && this.carDuration > 0) {
+        CarProgressCard({
+          carPosition: this.carPosition,
+          carDuration: this.carDuration,
+          carIsPlaying: this.carIsPlaying
+        })
+          .margin({ left: 16, right: 16, top: 12 })
+      }
+
+      // 实时日志卡片（最下方）
+      LogCard({ logs: this.appLogs })
+        .margin({ left: 16, right: 16, top: 12, bottom: 12 })
     }
     .width('100%')
     .height('100%')
+    .padding({ top: 48 })  // 避免与系统状态栏重叠
     .backgroundColor('#0F172A')
-    .scrollBar(BarState.Auto)
-    .scrollBarColor('#334155')
+  }
+
+  /**
+   * 格式化时间（毫秒 -> 分:秒，短格式）
+   */
+  private formatTimeShort(ms: number): string {
+    let totalSeconds = Math.max(0, Math.floor(ms / 1000))
+    let hours = Math.floor(totalSeconds / 3600)
+    let minutes = Math.floor((totalSeconds % 3600) / 60)
+    let seconds = totalSeconds % 60
+
+    if (hours > 0) {
+      return `${hours}:${this.pad2(minutes)}:${this.pad2(seconds)}`
+    }
+    return `${this.pad2(minutes)}:${this.pad2(seconds)}`
+  }
+
+  /**
+   * 数字补零
+   */
+  private pad2(n: number): string {
+    return n < 10 ? `0${n}` : `${n}`
   }
 }

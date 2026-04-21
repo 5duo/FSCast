@@ -23,7 +23,7 @@ data class MainUiState(
     val hasContinueWatching: Boolean = false,
     val lastPlayedTitle: String = "",
     val lastPlayedProgress: Int = 0,
-    val audioOutputMode: String = "speaker",
+    val audioOutputMode: String = "bilibili",  // 默认原源模式
     val connectedPhoneDevice: String? = null,
     val webSocketClientCount: Int = 0,  // WebSocket连接的手机数量
 

@@ -190,7 +190,7 @@ private fun PlaybackControlSection(
                 modifier = Modifier.size(40.dp)
             )
 
-            // 音频输出切换按钮
+            // 音频输出切换按钮（始终可用）
             Surface(
                 onClick = onAudioOutputChange,
                 modifier = Modifier
@@ -198,7 +198,7 @@ private fun PlaybackControlSection(
                     .weight(1f),
                 shape = RoundedCornerShape(8.dp),
                 color = GoldSurfaceVariant,
-                enabled = webSocketConnected  // 只有WebSocket连接时才可用
+                enabled = true  // 始终可用，WebSocket未连接时可在扬声器和原源模式间切换
             ) {
                 Row(
                     modifier = Modifier

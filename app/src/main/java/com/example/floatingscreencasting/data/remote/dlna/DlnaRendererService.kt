@@ -194,6 +194,28 @@ class DlnaRendererService(private val context: Context) {
     }
 
     /**
+     * 获取HTTP服务器实例（用于发送DLNA事件通知）
+     */
+    fun getHttpServer(): DlnaHttpServer {
+        return httpServer
+    }
+
+    /**
+     * 设置是否拦截Stop命令（用于原源模式）
+     * @param intercept true=拦截Stop命令并忽略，false=正常处理Stop命令
+     */
+    fun setStopCommandIntercept(intercept: Boolean) {
+        httpServer.setStopCommandIntercept(intercept)
+    }
+
+    /**
+     * 设置Stop命令被拦截时的回调（用于暂停2秒后恢复播放）
+     */
+    fun setOnStopCommandIntercepted(callback: () -> Unit) {
+        httpServer.setOnStopCommandIntercepted(callback)
+    }
+
+    /**
      * 设置HTTP服务器回调
      */
     private fun setupHttpCallbacks() {

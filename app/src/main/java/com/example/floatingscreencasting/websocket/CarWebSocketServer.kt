@@ -65,8 +65,15 @@ class CarWebSocketServer(private val port: Int) : WebSocketServer(InetSocketAddr
         _connectionState.value = ConnectionState.Connected(clients.size)
         onClientConnected?.invoke(clientId)
 
-        // 发送欢迎消息
-        sendToClient(clientId, """{"type":"welcome","message":"已连接到车机"}""")
+        // 发送欢迎消息（包含时间戳，用于手机端时间校准）
+        val currentTime = System.currentTimeMillis()
+        val welcomeJson = org.json.JSONObject()
+        welcomeJson.put("type", "welcome")
+        val data = org.json.JSONObject()
+        data.put("message", "已连接到车机")
+        data.put("timestamp", currentTime)  // ⏱️ timestamp放在data对象里，与模拟器保持一致
+        welcomeJson.put("data", data)
+        sendToClient(clientId, welcomeJson.toString())
     }
 
     override fun onClose(conn: WebSocket?, code: Int, reason: String?, remote: Boolean) {
@@ -225,15 +232,29 @@ class CarWebSocketServer(private val port: Int) : WebSocketServer(InetSocketAddr
     /**
      * 发送进度同步到手机端
      * 添加序列号和时间戳，用于防止消息乱序和去重
+     * @param positionMs 车机当前播放位置（毫秒）
+     * @param durationMs 视频总时长（毫秒）
+     * @param isPlaying 是否正在播放
      */
     fun sendProgressUpdate(positionMs: Long, durationMs: Long, isPlaying: Boolean): Int {
         val sequenceNumber = messageSequenceNumber.incrementAndGet()
-        val command = buildJsonCommand("progress") {
-            put("sequenceNumber", sequenceNumber)
-            put("position", positionMs)
-            put("duration", durationMs)
-            put("isPlaying", isPlaying)
-        }
+        val currentTime = System.currentTimeMillis()
+
+        val json = org.json.JSONObject()
+        json.put("type", "command")
+        json.put("action", "progress")
+        json.put("timestamp", currentTime)
+
+        // 构建命令数据
+        val data = org.json.JSONObject()
+        data.put("sequenceNumber", sequenceNumber)
+        data.put("position", positionMs)
+        data.put("duration", durationMs)
+        data.put("isPlaying", isPlaying)
+        data.put("sendTime", currentTime)  // ⏱️ 添加sendTime字段，用于手机端时间对齐
+        json.put("data", data)
+
+        val command = json.toString()
         return broadcastMessage(command)
     }
 

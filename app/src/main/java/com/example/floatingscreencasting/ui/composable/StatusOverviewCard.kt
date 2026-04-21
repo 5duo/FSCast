@@ -28,6 +28,7 @@ fun StatusOverviewCard(
     isWebSocketServerRunning: Boolean,  // WebSocket服务器是否运行
     onRestartWebSocket: () -> Unit,
     onScanDevices: () -> Unit,
+    onAudioOutputChange: () -> Unit = {},  // 新增：音频输出切换回调
     modifier: Modifier = Modifier
 ) {
     // 对话框状态
@@ -88,7 +89,11 @@ fun StatusOverviewCard(
                 StatusUnit(
                     imageVector = MaterialIconsRes.VOLUME_UP,
                     title = "音频输出",
-                    status = if (audioOutputMode == "phone") "手机端" else "扬声器",
+                    status = when (audioOutputMode) {
+                        "phone" -> "手机端"
+                        "bilibili" -> "原源模式"
+                        else -> "扬声器"
+                    },
                     isActive = true,
                     modifier = Modifier.weight(1f)
                 )

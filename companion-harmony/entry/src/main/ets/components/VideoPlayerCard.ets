@@ -1,6 +1,6 @@
 /**
  * 视频播放器卡片组件（优化版）
- * 使用兼容性图标组件
+ * 使用原生Video控件，自带进度条和时间显示
  */
 import { hilog } from '@kit.PerformanceAnalysisKit'
 import { AppColors } from '../constants/AppColors'
@@ -27,13 +27,14 @@ export struct VideoPlayerCard {
   @Prop dlnaDuration: number = 0
 
   // 视频控制器
-  videoController: VideoController = new VideoController()
+  private videoController: VideoController = new VideoController()
 
   // 回调函数
   onPlayStateChange?: (isPlaying: boolean) => void
   onProgressUpdate?: (position: number, duration: number) => void
   onCompletion?: () => void
   onError?: (error: ESObject) => void
+  onControllerReady?: (controller: VideoController) => void  // 新增：controller准备好的回调
 
   build() {
     Column() {
@@ -78,6 +79,8 @@ export struct VideoPlayerCard {
           .objectFit(ImageFit.Contain)
           .onStart(() => {
             hilog.info(DOMAIN, TAG, '视频开始播放')
+            // 通知父组件controller已准备好
+            this.onControllerReady?.(this.videoController)
             this.onPlayStateChange?.(true)
           })
           .onPause(() => {
@@ -94,7 +97,7 @@ export struct VideoPlayerCard {
             this.onError?.(error)
           })
           .onUpdate((info: PlaybackInfo) => {
-            // 更新播放进度
+            // 原生控件已显示进度和时间，这里只回调给父组件用于状态同步
             this.onProgressUpdate?.(info.time, this.dlnaDuration)
           })
       } else {
@@ -118,49 +121,10 @@ export struct VideoPlayerCard {
         .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
       }
-
-      // 进度信息
-      if (this.dlnaDuration > 0) {
-        Row() {
-          Text(this.formatTime(this.dlnaPosition))
-            .fontSize(12)
-            .fontColor(AppColors.TEXT_SECONDARY)
-
-          Blank()
-
-          Text(this.formatTime(this.dlnaDuration))
-            .fontSize(12)
-            .fontColor(AppColors.TEXT_SECONDARY)
-        }
-        .width('100%')
-        .margin({ top: 8 })
-      }
     }
     .width('100%')
     .padding(16)
     .backgroundColor(AppColors.BG_CARD)
     .borderRadius(12)
-  }
-
-  /**
-   * 格式化时间（毫秒 -> 分:秒）
-   */
-  private formatTime(ms: number): string {
-    let totalSeconds = Math.max(0, Math.floor(ms / 1000))
-    let hours = Math.floor(totalSeconds / 3600)
-    let minutes = Math.floor((totalSeconds % 3600) / 60)
-    let seconds = totalSeconds % 60
-
-    if (hours > 0) {
-      return `${hours}:${this.pad2(minutes)}:${this.pad2(seconds)}`
-    }
-    return `${this.pad2(minutes)}:${this.pad2(seconds)}`
-  }
-
-  /**
-   * 数字补零
-   */
-  private pad2(n: number): string {
-    return n < 10 ? `0${n}` : `${n}`
   }
 }

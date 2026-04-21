@@ -3,6 +3,7 @@ package com.example.floatingscreencasting.dlna
 import android.util.Log
 import com.example.floatingscreencasting.data.remote.dlna.DlnaControlPoint
 import com.example.floatingscreencasting.data.remote.dlna.DlnaControlPoint.DlnaDevice
+import com.example.floatingscreencasting.data.remote.http.DlnaHttpServer
 import com.example.floatingscreencasting.websocket.CarWebSocketServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -83,7 +84,8 @@ class OperationLock {
 class AudioOutputController(
     private val dlnaDmcClient: DlnaControlPoint,
     private val phoneDeviceManager: PhoneDeviceManager,
-    webSocketServer: CarWebSocketServer? = null
+    webSocketServer: CarWebSocketServer? = null,
+    private val dlnaRendererService: com.example.floatingscreencasting.data.remote.dlna.DlnaRendererService? = null  // 用于控制DLNA服务
 ) {
 
     companion object {
@@ -93,8 +95,9 @@ class AudioOutputController(
     }
 
     enum class OutputMode {
-        SPEAKER,  // 车机扬声器
-        PHONE     // 手机端
+        SPEAKER,   // 车机扬声器
+        PHONE,     // 手机端（WebSocket）
+        BILIBILI   // 原源模式（暂停2秒→继续播放）
     }
 
     private var currentMode = OutputMode.SPEAKER
@@ -165,6 +168,10 @@ class AudioOutputController(
             OutputMode.SPEAKER -> {
                 // 切换到车机扬声器
                 stopPhonePlayback()
+                // 取消Stop命令拦截（如果之前开启了）
+                dlnaRendererService?.setStopCommandIntercept(false)
+                // 移除Stop拦截回调（使用空回调）
+                dlnaRendererService?.setOnStopCommandIntercepted {}
                 currentMode = mode
                 // 取消静音
                 muteControlCallback?.setMuted(false)
@@ -247,9 +254,45 @@ class AudioOutputController(
                 // 切换成功
                 currentMode = mode
                 startProgressSync()
+                // 取消Stop命令拦截（如果之前开启了）
+                dlnaRendererService?.setStopCommandIntercept(false)
+                // 移除Stop拦截回调（使用空回调）
+                dlnaRendererService?.setOnStopCommandIntercepted {}
                 // 静音车机端
                 muteControlCallback?.setMuted(true)
                 Log.i(TAG, "手机端模式（WebSocket）：车机静音，同步启动完成")
+                return true
+            }
+            OutputMode.BILIBILI -> {
+                // 原源模式：开启Stop拦截 + 静音
+                Log.i(TAG, "========================================")
+                Log.i(TAG, "切换到原源模式")
+                Log.i(TAG, "策略：开启Stop拦截 + 静音，收到Stop时暂停2秒后恢复")
+                Log.i(TAG, "========================================")
+
+                // 1. 开启Stop命令拦截
+                Log.i(TAG, "步骤1: 开启Stop命令拦截")
+                dlnaRendererService?.setStopCommandIntercept(true)
+
+                // 2. 设置Stop命令被拦截时的回调（暂停2秒后恢复播放）
+                Log.i(TAG, "步骤2: 设置Stop拦截回调")
+                dlnaRendererService?.setOnStopCommandIntercepted {
+                    scope.launch {
+                        Log.i(TAG, "Stop命令被拦截，暂停4秒后恢复播放")
+                        playbackStateListener?.onPause()
+                        delay(4000)  // 暂停4秒
+                        playbackStateListener?.onPlay()
+                        Log.i(TAG, "已恢复播放")
+                    }
+                }
+
+                // 3. 静音车机端
+                Log.i(TAG, "步骤3: 静音车机端")
+                muteControlCallback?.setMuted(true)
+
+                // 切换成功
+                currentMode = mode
+                Log.i(TAG, "原源模式已激活：Stop命令已拦截，车机已静音")
                 return true
             }
         }
@@ -291,7 +334,8 @@ class AudioOutputController(
         Log.d(TAG, "play调用: phonePositionMs=$phonePositionMs, syncId=$syncId, mode=$currentMode")
 
         return when (currentMode) {
-            OutputMode.SPEAKER -> {
+            OutputMode.SPEAKER, OutputMode.BILIBILI -> {
+                // SPEAKER和BILIBILI模式：本地播放控制
                 playbackStateListener?.onPlay()
                 true
             }
@@ -344,7 +388,8 @@ class AudioOutputController(
         Log.d(TAG, "pause调用: syncId=$syncId, mode=$currentMode")
 
         return when (currentMode) {
-            OutputMode.SPEAKER -> {
+            OutputMode.SPEAKER, OutputMode.BILIBILI -> {
+                // SPEAKER和BILIBILI模式：本地播放控制
                 playbackStateListener?.onPause()
                 true
             }
@@ -385,7 +430,8 @@ class AudioOutputController(
         stopProgressSync()
 
         return when (currentMode) {
-            OutputMode.SPEAKER -> {
+            OutputMode.SPEAKER, OutputMode.BILIBILI -> {
+                // SPEAKER和BILIBILI模式：本地播放控制
                 playbackStateListener?.onStop()
                 true
             }
@@ -436,7 +482,8 @@ class AudioOutputController(
         }
 
         return when (currentMode) {
-            OutputMode.SPEAKER -> {
+            OutputMode.SPEAKER, OutputMode.BILIBILI -> {
+                // SPEAKER和BILIBILI模式：本地播放控制
                 playbackStateListener?.onSeek(positionMs)
                 true
             }
@@ -573,7 +620,11 @@ class AudioOutputController(
             "switch_output" -> {
                 // 远程切换音频输出命令
                 val modeStr = data.optString("mode", "speaker")
-                val newMode = if (modeStr == "phone") OutputMode.PHONE else OutputMode.SPEAKER
+                val newMode = when (modeStr) {
+                    "phone" -> OutputMode.PHONE
+                    "bilibili" -> OutputMode.BILIBILI
+                    else -> OutputMode.SPEAKER
+                }
                 switchOutputMode(newMode)
             }
             else -> {

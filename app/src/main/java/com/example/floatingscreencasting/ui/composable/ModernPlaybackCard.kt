@@ -137,10 +137,15 @@ private fun AudioOutputSelector(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
+            val (icon, iconColor, modeText) = when (currentMode) {
+                "phone" -> Triple("📱", Color(0xFF6366F1), "FSCast Remote")
+                "bilibili" -> Triple("📺", Color(0xFF00A1D6), "原源模式")
+                else -> Triple("🔊", OnSurface, "车机扬声器")
+            }
             Text(
-                text = if (currentMode == "phone") "📱" else "🔊",
+                text = icon,
                 style = MaterialTheme.typography.titleLarge,
-                color = if (currentMode == "phone") Color(0xFF6366F1) else OnSurface
+                color = iconColor
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column {
@@ -150,7 +155,7 @@ private fun AudioOutputSelector(
                     color = OnSurfaceVariant
                 )
                 Text(
-                    text = if (currentMode == "phone") "FSCast Remote" else "车机扬声器",
+                    text = modeText,
                     style = MaterialTheme.typography.bodyMedium,
                     color = OnSurface,
                     fontWeight = FontWeight.SemiBold
@@ -208,11 +213,25 @@ private fun AudioOutputSelector(
         }
 
         // 右侧：切换按钮
+        // WebSocket已连接：speaker -> phone -> bilibili -> speaker（三种模式）
+        // WebSocket未连接：speaker <-> bilibili（两种模式切换）
+        val (nextModeText, buttonEnabled) = when (currentMode) {
+            "speaker" -> {
+                if (webSocketConnected) {
+                    Pair("切换到手机", true)
+                } else {
+                    Pair("切换到原源", true)
+                }
+            }
+            "phone" -> Pair("切换到原源", true)
+            "bilibili" -> Pair("切换到车机", true)
+            else -> Pair("切换到手机", webSocketConnected)
+        }
         Surface(
             onClick = onModeChange,
             shape = RoundedCornerShape(8.dp),
             color = SurfaceVariant,
-            enabled = webSocketConnected  // 只有WebSocket连接时才允许切换
+            enabled = buttonEnabled
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -220,16 +239,16 @@ private fun AudioOutputSelector(
                 horizontalArrangement = Arrangement.Center
             ) {
                 Text(
-                    text = if (currentMode == "phone") "切换到车机" else "切换到手机",
+                    text = nextModeText,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (webSocketConnected) OnSurface else OnSurface.copy(alpha = 0.38f),
+                    color = if (buttonEnabled) OnSurface else OnSurface.copy(alpha = 0.38f),
                     fontWeight = FontWeight.SemiBold
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = "→",
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (webSocketConnected) OnSurfaceVariant else OnSurfaceVariant.copy(alpha = 0.38f)
+                    color = if (buttonEnabled) OnSurfaceVariant else OnSurfaceVariant.copy(alpha = 0.38f)
                 )
             }
         }
@@ -411,13 +430,18 @@ private fun ModernPlaybackControls(
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        // 音频输出切换
+        // 音频输出切换（支持三种模式：speaker -> phone -> bilibili）
+        val (audioIcon, audioDesc, audioTint) = when (audioOutputMode) {
+            "phone" -> Triple("📱", "输出到手机", Color(0xFF6366F1))
+            "bilibili" -> Triple("📺", "原源模式", Color(0xFF00A1D6))
+            else -> Triple("🔊", "输出到车机", OnSurfaceVariant)
+        }
         ModernControlButton(
             onClick = onAudioOutputChange,
-            icon = if (audioOutputMode == "phone") "📱" else "🔊",
-            contentDescription = if (audioOutputMode == "phone") "输出到手机" else "输出到车机",
+            icon = audioIcon,
+            contentDescription = audioDesc,
             size = 50.dp,
-            tint = if (audioOutputMode == "phone") Color(0xFF6366F1) else OnSurfaceVariant
+            tint = audioTint
         )
 
         Spacer(modifier = Modifier.width(12.dp))
