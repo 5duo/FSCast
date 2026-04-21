@@ -1582,6 +1582,50 @@ class ComposeMainActivity : AppCompatActivity() {
 
     // ==================== 生命周期 ====================
 
+    override fun onResume() {
+        super.onResume()
+        Log.d("ComposeMainActivity", "onResume - 检查并恢复VideoPresentation状态")
+
+        // 检查是否有正在播放的视频
+        val hasVideo = uiState.value.currentVideoUri.isNotEmpty()
+        val isPlaying = uiState.value.isPlaying
+
+        Log.d("ComposeMainActivity", "onResume - hasVideo: $hasVideo, isPlaying: $isPlaying")
+        Log.d("ComposeMainActivity", "onResume - videoPresentation: ${videoPresentation != null}")
+        Log.d("ComposeMainActivity", "onResume - isShowing: ${videoPresentation?.isShowing}")
+
+        // 如果有视频正在播放，但Presentation未显示或已暂停，则恢复播放
+        if (hasVideo && videoPresentation != null) {
+            val presentation = videoPresentation!!
+
+            // 如果Presentation没有显示，先显示它
+            if (!presentation.isShowing) {
+                Log.d("ComposeMainActivity", "onResume - Presentation未显示，调用show()")
+                presentation.show()
+            }
+
+            // 如果之前在播放，现在恢复播放
+            if (isPlaying) {
+                Log.d("ComposeMainActivity", "onResume - 恢复播放: ${uiState.value.currentVideoUri}")
+                val uri = uiState.value.currentVideoUri
+                val title = uiState.value.currentVideoTitle
+                val position = uiState.value.currentPosition
+
+                // 重新加载视频并跳转到当前进度
+                if (uri.isNotEmpty()) {
+                    presentation.playMedia(uri, title, 0, position)
+                    // 稍微延迟后确保播放状态
+                    presentation.window?.decorView?.postDelayed({
+                        if (!presentation.isPlaying()) {
+                            Log.d("ComposeMainActivity", "onResume - 补充调用play()确保播放")
+                            presentation.play()
+                        }
+                    }, 500)
+                }
+            }
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         // 🔧 修复内存泄漏：取消协程作用域
